@@ -1,0 +1,245 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  MANAGER
+  STAFF
+}
+
+enum PurchaseOrderStatus {
+  PENDING
+  APPROVED
+  RECEIVED
+  CANCELLED
+}
+
+enum SalesOrderStatus {
+  PENDING
+  PROCESSING
+  DISPATCHED
+  COMPLETED
+  CANCELLED
+}
+
+enum DeliveryStatus {
+  PENDING
+  IN_TRANSIT
+  DELIVERED
+  RETURNED
+}
+
+enum StockTransactionType {
+  IN
+  OUT
+  ADJUSTMENT
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id                String             @id @default(uuid())
+  name              String
+  email             String             @unique
+  password          String
+  role              Role               @default(STAFF)
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  stockTransactions StockTransaction[]
+  purchaseOrders    PurchaseOrder[]
+  salesOrders       SalesOrder[]
+  auditLogs         AuditLog[]
+}
+
+model Category {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  products    Product[]
+}
+
+model Supplier {
+  id             String          @id @default(uuid())
+  name           String
+  contactPerson  String?
+  email          String?
+  phone          String
+  address        String?
+  paymentTerms   String?
+  notes          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  products       Product[]
+  purchaseOrders PurchaseOrder[]
+}
+
+model Product {
+  id                 String              @id @default(uuid())
+  name               String
+  sku                String?             @unique
+  description        String?
+  imageUrl           String?
+  imagePublicId      String?
+  unit               String              @default("piece")
+  reorderLevel       Int                 @default(10)
+  currentStock       Int                 @default(0)
+  costPrice          Float?
+  sellingPrice       Float?
+  categoryId         String
+  category           Category            @relation(fields: [categoryId], references: [id])
+  supplierId         String?
+  supplier           Supplier?           @relation(fields: [supplierId], references: [id])
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  stockTransactions  StockTransaction[]
+  purchaseOrderItems PurchaseOrderItem[]
+  salesOrderItems    SalesOrderItem[]
+  alerts             Alert[]
+}
+
+model StockTransaction {
+  id            String               @id @default(uuid())
+  productId     String
+  product       Product              @relation(fields: [productId], references: [id])
+  type          StockTransactionType
+  quantity      Int
+  previousStock Int
+  newStock      Int
+  note          String?
+  userId        String
+  user          User                 @relation(fields: [userId], references: [id])
+  createdAt     DateTime             @default(now())
+}
+
+model PurchaseOrder {
+  id          String              @id @default(uuid())
+  orderNumber String              @unique
+  supplierId  String
+  supplier    Supplier            @relation(fields: [supplierId], references: [id])
+  status      PurchaseOrderStatus @default(PENDING)
+  totalAmount Float?
+  notes       String?
+  createdById String
+  createdBy   User                @relation(fields: [createdById], references: [id])
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  items       PurchaseOrderItem[]
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  productId       String
+  product         Product       @relation(fields: [productId], references: [id])
+  quantity        Int
+  receivedQty     Int           @default(0)
+  unitPrice       Float?
+}
+
+model Customer {
+  id                 String       @id @default(uuid())
+  name               String
+  email              String?
+  phone              String
+  address            String?
+  deliveryAddress    String?
+  notes              String?
+  outstandingBalance Float        @default(0)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  salesOrders        SalesOrder[]
+}
+
+model SalesOrder {
+  id          String           @id @default(uuid())
+  orderNumber String           @unique
+  customerId  String
+  customer    Customer         @relation(fields: [customerId], references: [id])
+  status      SalesOrderStatus @default(PENDING)
+  totalAmount Float?
+  notes       String?
+  createdById String
+  createdBy   User             @relation(fields: [createdById], references: [id])
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  items       SalesOrderItem[]
+  delivery    Delivery?
+  payment     Payment?
+}
+
+model SalesOrderItem {
+  id           String     @id @default(uuid())
+  salesOrderId String
+  salesOrder   SalesOrder @relation(fields: [salesOrderId], references: [id])
+  productId    String
+  product      Product    @relation(fields: [productId], references: [id])
+  quantity     Int
+  unitPrice    Float?
+  totalPrice   Float?
+}
+
+model Delivery {
+  id           String         @id @default(uuid())
+  salesOrderId String         @unique
+  salesOrder   SalesOrder     @relation(fields: [salesOrderId], references: [id])
+  status       DeliveryStatus @default(PENDING)
+  deliveryDate DateTime?
+  deliveredAt  DateTime?
+  notes        String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+model Payment {
+  id              String        @id @default(uuid())
+  salesOrderId    String        @unique
+  salesOrder      SalesOrder    @relation(fields: [salesOrderId], references: [id])
+  method          String        @default("KHALTI")
+  status          PaymentStatus @default(PENDING)
+  amount          Float
+  khaltiPidx      String?       @unique
+  khaltiTransactionId String?
+  verifiedAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model Alert {
+  id        String   @id @default(uuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  createdAt DateTime @default(now())
+}
