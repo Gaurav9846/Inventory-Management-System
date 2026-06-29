@@ -1,4 +1,5 @@
-import { format, formatDistanceToNow } from "date-fns";
+// src/utils/helpers.js
+import { format, formatDistanceToNow as fnsFormatDistanceToNow } from "date-fns";
 
 export const formatDate = (date, fmt = "dd MMM yyyy") =>
   date ? format(new Date(date), fmt) : "—";
@@ -6,8 +7,12 @@ export const formatDate = (date, fmt = "dd MMM yyyy") =>
 export const formatDateTime = (date) =>
   date ? format(new Date(date), "dd MMM yyyy, hh:mm a") : "—";
 
+// ✅ Add this export for formatDistanceToNow
+export const formatDistanceToNow = (date) =>
+  date ? fnsFormatDistanceToNow(new Date(date), { addSuffix: true }) : "—";
+
 export const timeAgo = (date) =>
-  date ? formatDistanceToNow(new Date(date), { addSuffix: true }) : "—";
+  date ? fnsFormatDistanceToNow(new Date(date), { addSuffix: true }) : "—";
 
 export const formatCurrency = (amount, currency = "NPR") =>
   amount != null

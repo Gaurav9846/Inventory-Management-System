@@ -1,6 +1,6 @@
 // src/pages/manager/ManagerLowStock.jsx
 import { useEffect, useState, useCallback } from "react";
-import { productsApi, alertsApi, purchaseOrdersApi, suppliersApi } from "@/api/index.js";
+import { productsApi, notificationsApi, purchaseOrdersApi, suppliersApi } from "@/api/index.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.jsx";
 import { Button } from "@/components/ui/button.jsx";
 import { Input } from "@/components/ui/input.jsx";
@@ -101,7 +101,7 @@ export default function ManagerLowStock() {
       const params = filterUnread ? { isRead: false } : {};
       const [pRes, aRes, sRes] = await Promise.all([
         productsApi.getAll({ lowStock: true }),
-        alertsApi.getAll(params),
+        notificationsApi.getAll(params),
         suppliersApi.getAll(),
       ]);
       setLowProducts(pRes.data);
@@ -113,9 +113,9 @@ export default function ManagerLowStock() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  const markRead    = async (id) => { try { await alertsApi.markRead(id); fetchAll(); } catch { toast.error("Failed."); } };
-  const markAllRead = async ()   => { try { await alertsApi.markAllRead(); toast.success("All marked read."); fetchAll(); } catch { toast.error("Failed."); } };
-  const deleteAlert = async (id) => { try { await alertsApi.remove(id); toast.success("Dismissed."); fetchAll(); } catch { toast.error("Failed."); } };
+  const markRead    = async (id) => { try { await notificationsApi.markRead(id); fetchAll(); } catch { toast.error("Failed."); } };
+  const markAllRead = async ()   => { try { await notificationsApi.markAllRead(); toast.success("All marked read."); fetchAll(); } catch { toast.error("Failed."); } };
+  const deleteAlert = async (id) => { try { await notificationsApi.remove(id); toast.success("Dismissed."); fetchAll(); } catch { toast.error("Failed."); } };
 
   if (loading) return <LoadingSpinner />;
 

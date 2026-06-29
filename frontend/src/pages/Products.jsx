@@ -176,7 +176,7 @@ export default function Products() {
       ]);
       setProducts(pRes.data);
       setCategories(cRes.data);
-      setSuppliers(sRes.data);
+      setSuppliers(sRes.data.suppliers);
     } catch { toast.error("Failed to load products."); }
     finally { setLoading(false); }
   }, [search, filterCat, filterLow]);

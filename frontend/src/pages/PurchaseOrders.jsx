@@ -130,9 +130,13 @@ export default function PurchaseOrders() {
         suppliersApi.getAll(),
         productsApi.getAll(),
       ]);
+      console.log("Suppliers response:", sRes.data);
+    console.log("Products response:", pRes.data);
+    console.log("Orders response:", oRes.data);
+
       setOrders(oRes.data.data);
-      setSuppliers(sRes.data);
-      setProducts(pRes.data);
+setSuppliers(sRes.data.suppliers);   // ✅ extract the suppliers array
+setProducts(pRes.data);              // ✅ keep as is (already an array)
     } catch { toast.error("Failed to load purchase orders."); }
     finally { setLoading(false); }
   }, [filterStatus]);

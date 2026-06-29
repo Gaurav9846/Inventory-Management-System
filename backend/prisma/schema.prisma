@@ -16,13 +16,6 @@ enum Role {
   STAFF
 }
 
-enum PurchaseOrderStatus {
-  PENDING
-  APPROVED
-  RECEIVED
-  CANCELLED
-}
-
 enum SalesOrderStatus {
   PENDING
   PROCESSING
@@ -51,6 +44,106 @@ enum PaymentStatus {
   REFUNDED
 }
 
+enum PaymentMethod {
+  CASH
+  ONLINE
+  CREDIT
+  PAY_LATER
+}
+
+enum PaymentStatusOrder {
+  PENDING
+  PAID
+  RECEIVED_UNPAID
+  CANCELLED
+}
+
+enum CustomerType {
+  NEW
+  REGULAR
+  VIP
+}
+
+enum CreditStatus {
+  PAID
+  PARTIAL
+  OVERDUE
+  PENDING
+}
+
+enum ProductType {
+  JAR_20L
+  BOTTLE_500ML
+  BOTTLE_1L
+  OTHER
+}
+
+enum StockAdjustmentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+enum AdjustmentType {
+  DAMAGE
+  EXPIRED
+  CORRECTION
+  THEFT
+  RETURN
+  OTHER
+}
+
+enum NotificationType {
+  LOW_STOCK
+  CREDIT_DUE
+  ORDER_UPDATE
+  SUPPLIER_DELAY
+  PAYMENT_RECEIVED
+  APPROVAL_REQUEST
+  SYSTEM_WARNING
+  STOCK_ADJUSTMENT
+  DELIVERY_UPDATE
+  NEW_ORDER
+}
+
+enum NotificationPriority {
+  CRITICAL
+  WARNING
+  INFORMATION
+}
+
+enum EmailStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum ReportType {
+  SALES
+  FINANCIAL
+  INVENTORY
+  CUSTOMER
+  SUPPLIER
+  EMPLOYEE
+}
+
+enum ReportPeriod {
+  DAILY
+  WEEKLY
+  MONTHLY
+  CUSTOM
+}
+
+enum PurchaseOrderStatus {
+  PENDING
+  APPROVED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model User {
@@ -62,13 +155,33 @@ model User {
   isActive          Boolean            @default(true)
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
+  
+  // Relations
   stockTransactions StockTransaction[]
-  purchaseOrders    PurchaseOrder[]
+  purchaseOrders    PurchaseOrder[]    @relation("PurchaseOrderCreator")
+  approvedOrders    PurchaseOrder[]    @relation("PurchaseOrderApprover")
+  cancelledOrders   PurchaseOrder[]    @relation("PurchaseOrderCanceller")
   salesOrders       SalesOrder[]
   auditLogs         AuditLog[]
+  creditPayments    CreditPayment[]
+  requestedAdjustments StockAdjustment[] @relation("RequestedAdjustments")
+  approvedAdjustments  StockAdjustment[] @relation("ApprovedAdjustments")
+  staffPerformance     StaffPerformance?
+  notifications        Notification[]
+  notificationPref     NotificationPreference?
+  savedReports         SavedReport[]
+  
+  // Supplier & Purchase Order relations
+  purchaseOrderPayments   PurchaseOrderPayment[]
+  goodsReceivingNotes     GoodsReceivingNote[]
+  
+  // Add this line for invoice uploads
+  purchaseOrderInvoices   PurchaseOrderInvoice[]  // ✅ ADD THIS LINE
 }
 
-model Category {
+// ==================== PRODUCT CATEGORY (For Finished Goods - What you SELL) ====================
+
+model ProductCategory {
   id          String    @id @default(uuid())
   name        String    @unique
   description String?
@@ -77,20 +190,76 @@ model Category {
   products    Product[]
 }
 
-model Supplier {
-  id             String          @id @default(uuid())
-  name           String
-  contactPerson  String?
-  email          String?
-  phone          String
-  address        String?
-  paymentTerms   String?
-  notes          String?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  products       Product[]
-  purchaseOrders PurchaseOrder[]
+// ==================== RAW MATERIAL CATEGORY (For Raw Materials - What you BUY) ====================
+
+model RawMaterialCategory {
+  id          String        @id @default(uuid())
+  name        String        @unique
+  description String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  rawMaterials RawMaterial[]
 }
+
+// ==================== SUPPLIER MODEL ====================
+
+model Supplier {
+  id                 String          @id @default(uuid())
+  name               String
+  contactPerson      String?
+  email              String?
+  phone              String
+  address            String?
+  productCategories  String[]        
+  paymentTerms       String?         
+  status             String          @default("Active")
+  performanceRating  Float           @default(4.0)
+  bankName           String?
+  bankAccountNumber  String?
+  bankAccountName    String?
+  bankBranch         String?
+  notes              String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  
+  // Relations
+  rawMaterials       RawMaterial[]      
+  purchaseOrders     PurchaseOrder[]
+  products           Product[]
+}
+
+// ==================== RAW MATERIAL MODEL ====================
+
+model RawMaterial {
+  id              String              @id @default(uuid())
+  name            String
+  sku             String?             @unique
+  description     String?
+  unit            String              @default("piece")
+  categoryId      String
+  category        RawMaterialCategory @relation(fields: [categoryId], references: [id])
+  currentStock    Int                 @default(0)
+  reorderLevel    Int                 @default(10)
+  unitCost        Float?
+  supplierId      String?
+  supplier        Supplier?           @relation(fields: [supplierId], references: [id])
+  imageUrl        String?
+  imagePublicId   String?
+  status          String              @default("Active")
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  
+  // Relations
+  purchaseOrderItems PurchaseOrderRawMaterial[]
+  stockTransactions  StockTransaction[]
+  goodsReceivingItems GoodsReceivingRawMaterial[]
+  
+  @@index([supplierId])
+  @@index([categoryId])
+  @@index([status])
+}
+
+// ==================== PRODUCT MODEL (Finished Goods) ====================
 
 model Product {
   id                 String              @id @default(uuid())
@@ -100,49 +269,118 @@ model Product {
   imageUrl           String?
   imagePublicId      String?
   unit               String              @default("piece")
+  type               ProductType         @default(OTHER)
   reorderLevel       Int                 @default(10)
   currentStock       Int                 @default(0)
   costPrice          Float?
   sellingPrice       Float?
   categoryId         String
-  category           Category            @relation(fields: [categoryId], references: [id])
+  category           ProductCategory     @relation(fields: [categoryId], references: [id])
   supplierId         String?
   supplier           Supplier?           @relation(fields: [supplierId], references: [id])
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
+  
+  // Relations
   stockTransactions  StockTransaction[]
   purchaseOrderItems PurchaseOrderItem[]
   salesOrderItems    SalesOrderItem[]
-  alerts             Alert[]
+  stockAdjustments   StockAdjustment[]
+  inventoryMovements InventoryMovement[]
 }
 
-model StockTransaction {
-  id            String               @id @default(uuid())
-  productId     String
-  product       Product              @relation(fields: [productId], references: [id])
-  type          StockTransactionType
-  quantity      Int
-  previousStock Int
-  newStock      Int
-  note          String?
-  userId        String
-  user          User                 @relation(fields: [userId], references: [id])
-  createdAt     DateTime             @default(now())
-}
+// ==================== PURCHASE ORDER MODELS ====================
 
 model PurchaseOrder {
-  id          String              @id @default(uuid())
-  orderNumber String              @unique
-  supplierId  String
-  supplier    Supplier            @relation(fields: [supplierId], references: [id])
-  status      PurchaseOrderStatus @default(PENDING)
-  totalAmount Float?
-  notes       String?
-  createdById String
-  createdBy   User                @relation(fields: [createdById], references: [id])
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  items       PurchaseOrderItem[]
+  id                   String               @id @default(uuid())
+  orderNumber          String               @unique
+  supplierId           String
+  supplier             Supplier             @relation(fields: [supplierId], references: [id])
+  status               PurchaseOrderStatus  @default(PENDING)
+  paymentStatus        String               @default("UNPAID")
+  expectedDeliveryDate DateTime?
+  deliveredAt          DateTime?
+  deliveredOnTime      Boolean?
+  warehouseDestination String?
+  subtotal             Float?               @default(0)
+  discount             Float?               @default(0)
+  tax                  Float?               @default(0)
+  totalAmount          Float?               @default(0)
+  notes                String?
+  invoiceUrl           String?
+  createdById          String
+  createdBy            User                 @relation("PurchaseOrderCreator", fields: [createdById], references: [id])
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  orderDate            DateTime             @default(now())
+  
+  // Approval fields with unique relation names
+  approvedById         String?
+  approvedBy           User?                @relation("PurchaseOrderApprover", fields: [approvedById], references: [id])
+  approvedAt           DateTime?
+  
+  cancelledById        String?
+  cancelledBy          User?                @relation("PurchaseOrderCanceller", fields: [cancelledById], references: [id])
+  cancelledAt          DateTime?
+  
+  // Relations
+  items                PurchaseOrderRawMaterial[]
+  goodsReceivingNotes  GoodsReceivingNote[]
+  payments             PurchaseOrderPayment[]
+  purchaseOrderItems   PurchaseOrderItem[]
+   invoices PurchaseOrderInvoice[]
+}
+
+model PurchaseOrderInvoice {
+  id              String   @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  imageUrl        String
+  imagePublicId   String?
+  fileName        String?
+  fileSize        Int?
+  uploadedById    String
+  uploadedBy      User     @relation(fields: [uploadedById], references: [id])
+  notes           String?
+  createdAt       DateTime @default(now())
+  
+  @@index([purchaseOrderId])
+  @@index([createdAt])
+}
+
+
+model PurchaseOrderRawMaterial {
+  id              String         @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder  @relation(fields: [purchaseOrderId], references: [id])
+  rawMaterialId   String
+  rawMaterial     RawMaterial    @relation(fields: [rawMaterialId], references: [id])
+  quantity        Int
+  receivedQty     Int            @default(0)
+  damagedQty      Int            @default(0)
+  unitPrice       Float?
+  totalPrice      Float?
+  remarks         String?
+  
+  @@index([purchaseOrderId])
+  @@index([rawMaterialId])
+}
+
+model PurchaseOrderPayment {
+  id              String   @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  amount          Float
+  paymentMethod   String
+  transactionId   String?  @unique
+  paymentDate     DateTime @default(now())
+  recordedById    String
+  recordedBy      User     @relation(fields: [recordedById], references: [id])
+  notes           String?
+  createdAt       DateTime @default(now())
+  
+  @@index([purchaseOrderId])
+  @@index([paymentDate])
 }
 
 model PurchaseOrderItem {
@@ -156,18 +394,76 @@ model PurchaseOrderItem {
   unitPrice       Float?
 }
 
+// ==================== GOODS RECEIVING NOTE MODELS ====================
+
+model GoodsReceivingNote {
+  id              String                    @id @default(uuid())
+  grnNumber       String                    @unique
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder             @relation(fields: [purchaseOrderId], references: [id])
+  receivedById    String
+  receivedBy      User                      @relation(fields: [receivedById], references: [id])
+  receivedDate    DateTime                  @default(now())
+  notes           String?
+  items           GoodsReceivingRawMaterial[]
+  createdAt       DateTime                  @default(now())
+  
+  @@index([purchaseOrderId])
+  @@index([grnNumber])
+}
+
+model GoodsReceivingRawMaterial {
+  id                  String         @id @default(uuid())
+  grnId               String
+  grn                 GoodsReceivingNote @relation(fields: [grnId], references: [id], onDelete: Cascade)
+  rawMaterialId       String
+  rawMaterial         RawMaterial    @relation(fields: [rawMaterialId], references: [id])
+  orderedQty          Int
+  previouslyReceived  Int            @default(0)
+  receivedQty         Int
+  damagedQty          Int            @default(0)
+  acceptedQty         Int
+  remarks             String?
+  
+  @@index([grnId])
+  @@index([rawMaterialId])
+}
+
+// ==================== STOCK TRANSACTIONS ====================
+
+model StockTransaction {
+  id            String               @id @default(uuid())
+  productId     String?
+  product       Product?             @relation(fields: [productId], references: [id])
+  rawMaterialId String?
+  rawMaterial   RawMaterial?         @relation(fields: [rawMaterialId], references: [id])
+  type          StockTransactionType
+  quantity      Int
+  previousStock Int
+  newStock      Int
+  note          String?
+  userId        String
+  user          User                 @relation(fields: [userId], references: [id])
+  createdAt     DateTime             @default(now())
+}
+
+// ==================== SALES & CUSTOMER MODELS ====================
+
 model Customer {
-  id                 String       @id @default(uuid())
+  id                 String          @id @default(uuid())
   name               String
   email              String?
   phone              String
   address            String?
   deliveryAddress    String?
   notes              String?
-  outstandingBalance Float        @default(0)
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
   salesOrders        SalesOrder[]
+  outstandingCredit  Float           @default(0)
+  customerType       CustomerType    @default(REGULAR)
+  creditLimit        Float?          @default(0)
+  creditAccount      CreditAccount?
 }
 
 model SalesOrder {
@@ -214,7 +510,7 @@ model Payment {
   id              String        @id @default(uuid())
   salesOrderId    String        @unique
   salesOrder      SalesOrder    @relation(fields: [salesOrderId], references: [id])
-  method          String        @default("KHALTI")
+  method          PaymentMethod @default(CASH)  
   status          PaymentStatus @default(PENDING)
   amount          Float
   khaltiPidx      String?       @unique
@@ -224,14 +520,211 @@ model Payment {
   updatedAt       DateTime      @updatedAt
 }
 
-model Alert {
-  id        String   @id @default(uuid())
-  productId String
-  product   Product  @relation(fields: [productId], references: [id])
-  message   String
-  isRead    Boolean  @default(false)
-  createdAt DateTime @default(now())
+// ==================== CREDIT MODELS ====================
+
+model CreditAccount {
+  id                String       @id @default(uuid())
+  customerId        String       @unique
+  customer          Customer     @relation(fields: [customerId], references: [id])
+  totalCredit       Float        @default(0)
+  paidAmount        Float        @default(0)
+  remainingBalance  Float        @default(0)
+  dueDate           DateTime
+  status            CreditStatus @default(PENDING)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  payments          CreditPayment[]
 }
+
+model CreditPayment {
+  id               String        @id @default(uuid())
+  creditAccountId  String
+  creditAccount    CreditAccount @relation(fields: [creditAccountId], references: [id], onDelete: Cascade)
+  amount           Float
+  paymentMethod    String
+  paymentDate      DateTime      @default(now())
+  transactionId    String?       @unique
+  notes            String?
+  status           String        @default("COMPLETED")
+  recordedById     String
+  recordedBy       User          @relation(fields: [recordedById], references: [id])
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([creditAccountId])
+  @@index([paymentDate])
+  @@index([status])
+}
+
+// ==================== STOCK ADJUSTMENT ====================
+
+// Update StockAdjustment model in schema.prisma
+model StockAdjustment {
+  id                String                @id @default(uuid())
+  requestNumber     String                @unique
+  productId         String
+  product           Product               @relation(fields: [productId], references: [id])
+  itemType          String                @default("PRODUCT") // "RAW_MATERIAL" or "PRODUCT"
+  adjustmentType    AdjustmentType        @default(CORRECTION)
+  currentStock      Int
+  requestedQuantity Int
+  newStock          Int
+  reason            String                // Now stores the predefined reason string
+  status            StockAdjustmentStatus @default(PENDING)
+  notes             String?               // Can be removed or kept optional
+  imageUrl          String?
+  imagePublicId     String?
+  
+  requestedById     String
+  requestedBy       User                  @relation("RequestedAdjustments", fields: [requestedById], references: [id])
+  
+  approvedById      String?
+  approvedBy        User?                 @relation("ApprovedAdjustments", fields: [approvedById], references: [id])
+  
+  rejectionReason   String?
+  
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  approvedAt        DateTime?
+  completedAt       DateTime?
+  
+  @@index([productId])
+  @@index([status])
+  @@index([requestedById])
+  @@index([adjustmentType])
+  @@index([createdAt])
+}
+
+// ==================== STAFF PERFORMANCE ====================
+
+model StaffPerformance {
+  id                String    @id @default(uuid())
+  userId            String    @unique
+  user              User      @relation(fields: [userId], references: [id])
+  month             DateTime  @default(now())
+  ordersProcessed   Int       @default(0)
+  revenueGenerated  Float     @default(0)
+  deliveriesCompleted Int     @default(0)
+  creditCollected   Float     @default(0)
+  performanceScore  Float     @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([userId, month])
+  @@index([month])
+}
+
+// ==================== NOTIFICATIONS ====================
+
+model Notification {
+  id            String              @id @default(uuid())
+  title         String
+  message       String
+  type          NotificationType
+  priority      NotificationPriority @default(INFORMATION)
+  isRead        Boolean             @default(false)
+  userId        String?
+  user          User?               @relation(fields: [userId], references: [id])
+  referenceId   String?
+  referenceType String?
+  emailSent     Boolean             @default(false)
+  emailSentAt   DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  
+  emailLogs     EmailLog[]
+  
+  @@index([userId])
+  @@index([isRead])
+  @@index([type])
+  @@index([priority])
+  @@index([createdAt])
+  @@index([referenceId])
+}
+
+model NotificationPreference {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id])
+  
+  emailNotifications    Boolean  @default(true)
+  smsNotifications      Boolean  @default(false)
+  inAppNotifications    Boolean  @default(true)
+  
+  lowStockAlerts        Boolean  @default(true)
+  creditDueAlerts       Boolean  @default(true)
+  supplierDelayAlerts   Boolean  @default(true)
+  orderUpdates          Boolean  @default(true)
+  systemWarnings        Boolean  @default(true)
+  approvalRequests      Boolean  @default(true)
+  stockAdjustments      Boolean  @default(true)
+  deliveryUpdates       Boolean  @default(true)
+  
+  criticalAlerts        Boolean  @default(true)
+  warningAlerts         Boolean  @default(true)
+  infoAlerts            Boolean  @default(true)
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model EmailLog {
+  id              String      @id @default(uuid())
+  notificationId  String
+  notification    Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  recipientEmail  String
+  recipientName   String?
+  subject         String
+  status          EmailStatus @default(PENDING)
+  errorMessage    String?
+  sentAt          DateTime?
+  createdAt       DateTime    @default(now())
+  
+  @@index([notificationId])
+  @@index([status])
+  @@index([sentAt])
+}
+
+// ==================== INVENTORY MOVEMENT ====================
+
+model InventoryMovement {
+  id            String           @id @default(uuid())
+  productId     String
+  product       Product          @relation(fields: [productId], references: [id])
+  type          StockTransactionType
+  quantity      Int
+  previousStock Int
+  newStock      Int
+  referenceId   String?
+  notes         String?
+  createdAt     DateTime         @default(now())
+
+  @@index([productId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+// ==================== SAVED REPORTS ====================
+
+model SavedReport {
+  id          String       @id @default(uuid())
+  name        String
+  type        ReportType
+  period      ReportPeriod
+  startDate   DateTime
+  endDate     DateTime
+  filters     Json?
+  generatedBy String
+  generator   User         @relation(fields: [generatedBy], references: [id])
+  fileUrl     String?
+  createdAt   DateTime     @default(now())
+  expiresAt   DateTime?
+
+  @@index([type])
+  @@index([createdAt])
+}
+
+// ==================== AUDIT LOG ====================
 
 model AuditLog {
   id        String   @id @default(uuid())

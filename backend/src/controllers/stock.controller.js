@@ -144,3 +144,41 @@ export const adjustStock = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+// Add to stock.controller.js - GET /api/stock/overview
+export const getStockOverview = async (req, res) => {
+  try {
+    const [rawMaterials, finishedProducts] = await Promise.all([
+      prisma.rawMaterial.findMany({
+        select: { id: true, name: true, currentStock: true, reorderLevel: true, unit: true, category: true }
+      }),
+      prisma.product.findMany({
+        select: { 
+          id: true, name: true, currentStock: true, reorderLevel: true, unit: true, 
+          category: { select: { name: true } } 
+        }
+      })
+    ]);
+
+    const allItems = [
+      ...rawMaterials.map(i => ({ currentStock: i.currentStock, reorderLevel: i.reorderLevel })),
+      ...finishedProducts.map(i => ({ currentStock: i.currentStock, reorderLevel: i.reorderLevel }))
+    ];
+
+    res.json({
+      totalRawMaterials: {
+        items: rawMaterials.length,
+        quantity: rawMaterials.reduce((sum, i) => sum + i.currentStock, 0)
+      },
+      totalFinishedProducts: {
+        items: finishedProducts.length,
+        quantity: finishedProducts.reduce((sum, i) => sum + i.currentStock, 0)
+      },
+      lowStockCount: allItems.filter(i => i.currentStock > 0 && i.currentStock <= i.reorderLevel).length,
+      outOfStockCount: allItems.filter(i => i.currentStock === 0).length
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};

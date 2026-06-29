@@ -1,5 +1,6 @@
+// src/pages/Alerts.jsx - Updated to use notificationsApi
 import { useEffect, useState, useCallback } from "react";
-import { alertsApi } from "@/api/index.js";
+import { notificationsApi } from "@/api/index.js"; // Changed from alertsApi
 import { PageHeader } from "@/components/shared/PageHeader.jsx";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner.jsx";
 import { Card, CardContent } from "@/components/ui/card.jsx";
@@ -10,34 +11,53 @@ import { toast } from "sonner";
 import { timeAgo } from "@/utils/helpers.js";
 
 export default function Alerts() {
-  const [alerts,  setAlerts]  = useState([]);
+  const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterUnread, setFilterUnread] = useState(true);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const params = filterUnread ? { isRead: false } : {};
-      const { data } = await alertsApi.getAll(params);
-      setAlerts(data);
-    } catch { toast.error("Failed to load alerts."); }
-    finally { setLoading(false); }
+      // Only get LOW_STOCK type notifications
+      const params = { 
+        type: "LOW_STOCK",
+        ...(filterUnread && { isRead: "false" })
+      };
+      const { data } = await notificationsApi.getAll(params);
+      setAlerts(data.data || []);
+    } catch { 
+      toast.error("Failed to load alerts."); 
+    }
+    finally { 
+      setLoading(false); 
+    }
   }, [filterUnread]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const markRead = async (id) => {
-    try { await alertsApi.markRead(id); fetchAll(); }
+    try { 
+      await notificationsApi.markAsRead(id); 
+      fetchAll(); 
+    }
     catch { toast.error("Failed to mark as read."); }
   };
 
   const markAll = async () => {
-    try { await alertsApi.markAllRead(); toast.success("All alerts marked as read."); fetchAll(); }
+    try { 
+      await notificationsApi.markAllAsRead(); 
+      toast.success("All alerts marked as read."); 
+      fetchAll(); 
+    }
     catch { toast.error("Failed to mark all as read."); }
   };
 
   const deleteAlert = async (id) => {
-    try { await alertsApi.remove(id); toast.success("Alert dismissed."); fetchAll(); }
+    try { 
+      await notificationsApi.delete(id); 
+      toast.success("Alert dismissed."); 
+      fetchAll(); 
+    }
     catch { toast.error("Failed to dismiss alert."); }
   };
 
@@ -94,12 +114,6 @@ export default function Alerts() {
                       </Button>
                     </div>
                   </div>
-                  {alert.product && (
-                    <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground bg-background rounded-lg px-3 py-2 border border-border w-fit">
-                      <span>Current: <strong className="text-destructive">{alert.product.currentStock} {alert.product.unit}</strong></span>
-                      <span>Reorder: <strong>{alert.product.reorderLevel}</strong></span>
-                    </div>
-                  )}
                 </div>
               </CardContent>
             </Card>
