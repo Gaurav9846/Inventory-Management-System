@@ -34,7 +34,7 @@ import AdminSupplierDetail from "@/pages/admin/AdminSupplierDetail.jsx";
 import AdminSuppliers from "@/pages/admin/AdminSuppliers.jsx";
 import AdminUsers from "@/pages/admin/AdminUsers.jsx";
 import AdminProductCatalog from "@/pages/admin/AdminProductCatalog.jsx";
-import AdminAuditLogs from "@/pages/admin/AdminAuditLogs.jsx";
+import AdminAuditlogs from "@/pages/admin/AdminAuditlogs.jsx";
 
 // ─── Manager pages ─────────────────────────────────────────────────────────
 import ManagerDashboard    from "@/pages/manager/ManagerDashboard.jsx";
@@ -149,7 +149,7 @@ export default function App() {
             
             {/* Administration */}
             <Route path="admin/users" element={<AdminUsers />} />
-            <Route path="admin/audit-logs" element={<AdminAuditLogs />} />
+            <Route path="admin/audit-logs" element={<AdminAuditlogs />} />
             <Route path="change-password" element={<ChangePassword />} />
             
             <Route path="*" element={<NotFound />} />
