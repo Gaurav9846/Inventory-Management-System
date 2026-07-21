@@ -14,6 +14,7 @@ import {
 import { toast } from 'sonner';
 import { StockStatsCard } from '@/components/stock/StockStatsCard';
 import { StockStatusBadge } from '@/components/stock/StockStatusBadge';
+import { StockDetailModal } from "@/components/stock/StockDetailModal.jsx";
 
 export default function ManagerStockOverview() {
   const navigate = useNavigate();
@@ -21,6 +22,8 @@ export default function ManagerStockOverview() {
   const [rawMaterials, setRawMaterials] = useState([]);
   const [products, setProducts] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [selectedItem, setSelectedItem] = useState(null);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [stats, setStats] = useState({
@@ -76,7 +79,7 @@ export default function ManagerStockOverview() {
       id: item.id,
       name: item.name,
       sku: item.sku,
-      category: item.category || 'Raw Material',
+      category: item.category?.name || item.category || 'Uncategorized',
       currentQuantity: item.currentStock || 0,
       unit: item.unit || 'piece',
       reorderLevel: item.reorderLevel || 10,
@@ -88,7 +91,7 @@ export default function ManagerStockOverview() {
       id: item.id,
       name: item.name,
       sku: item.sku,
-      category: item.category?.name || 'Finished Product',
+      category: item.category?.name || item.category?.name || 'Uncategorized',
       currentQuantity: item.currentStock || 0,
       unit: item.unit || 'piece',
       reorderLevel: item.reorderLevel || 10,
@@ -102,18 +105,17 @@ export default function ManagerStockOverview() {
     const matchesSearch = searchTerm === '' || 
       item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (item.sku && item.sku.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchesCategory = categoryFilter === 'all' || item.category === categoryFilter;
+    
+    let matchesCategory = true;
+    if (categoryFilter === 'raw') {
+      matchesCategory = item.type === 'raw';
+    } else if (categoryFilter === 'product') {
+      matchesCategory = item.type === 'product';
+    }
+    
     const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
     return matchesSearch && matchesCategory && matchesStatus;
   });
-
-  const handleViewDetails = (item) => {
-    if (item.type === 'raw') {
-      navigate(`/manager/raw-materials/${item.id}`);
-    } else {
-      navigate(`/manager/products/${item.id}`);
-    }
-  };
 
   if (loading) {
     return (
@@ -185,8 +187,8 @@ export default function ManagerStockOverview() {
               className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
             >
               <option value="all">All Categories</option>
-              <option value="Raw Material">Raw Materials</option>
-              <option value="Finished Product">Finished Products</option>
+              <option value="raw">Raw Materials</option>
+              <option value="product">Finished Products</option>
             </select>
             <select
               value={statusFilter}
@@ -235,7 +237,15 @@ export default function ManagerStockOverview() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>{item.category}</TableCell>
+                      <TableCell>
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          item.type === 'raw' 
+                            ? 'bg-blue-100 text-blue-800' 
+                            : 'bg-green-100 text-green-800'
+                        }`}>
+                          {item.category}
+                        </span>
+                      </TableCell>
                       <TableCell className="text-right">
                         <span className={`font-semibold ${
                           item.status === 'low' ? 'text-yellow-600' : 
@@ -257,7 +267,10 @@ export default function ManagerStockOverview() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleViewDetails(item)}
+                          onClick={() => {
+                            setSelectedItem(item);
+                            setDetailModalOpen(true);
+                          }}
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -270,6 +283,13 @@ export default function ManagerStockOverview() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Stock Detail Modal */}
+      <StockDetailModal
+        open={detailModalOpen}
+        onOpenChange={setDetailModalOpen}
+        item={selectedItem}
+      />
     </div>
   );
 }

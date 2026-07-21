@@ -19,7 +19,7 @@ const PAGE_TITLES = {
   "/manager/low-stock": "Low Stock Alerts",
   "/manager/orders": "Customer Orders",
   "/manager/purchase": "Purchase Orders",
-  "/manager/deliveries": "Delivery Management",
+  "/manager/delivery": "Delivery Management",
   "/manager/staff": "Staff Activity",
   "/manager/schedule": "Work Schedule",
   "/manager/reports": "Analytics & Reports",

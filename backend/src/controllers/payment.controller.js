@@ -13,22 +13,20 @@ const khaltiHeaders = {
 };
 
 // ── POST /api/payments/initiate ───────────────────────────────────────────────
-// body: { salesOrderId }
 export const initiatePayment = async (req, res) => {
   try {
-    const { salesOrderId } = req.body;
+    const { salesOrderId, platform = "KHALTI" } = req.body;
     if (!salesOrderId)
       return res.status(400).json({ message: "salesOrderId is required." });
 
     const order = await prisma.salesOrder.findUnique({
-      where:   { id: salesOrderId },
+      where: { id: salesOrderId },
       include: { customer: true, payment: true },
     });
     if (!order) return res.status(404).json({ message: "Sales order not found." });
     if (order.payment?.status === "COMPLETED")
       return res.status(400).json({ message: "Order already paid." });
 
-    // Khalti amount is in paisa (1 NPR = 100 paisa)
     const amountPaisa = Math.round((order.totalAmount || 0) * 100);
 
     const payload = {
@@ -38,9 +36,9 @@ export const initiatePayment = async (req, res) => {
       purchase_order_id: salesOrderId,
       purchase_order_name: `Order ${order.orderNumber}`,
       customer_info: {
-        name:  order.customer.name,
-        email: order.customer.email  || "",
-        phone: order.customer.phone  || "",
+        name: order.customer.name,
+        email: order.customer.email || "",
+        phone: order.customer.phone || "",
       },
     };
 
@@ -48,25 +46,33 @@ export const initiatePayment = async (req, res) => {
       headers: khaltiHeaders,
     });
 
-    // Store pidx (payment ID) in Payment record
     await prisma.payment.upsert({
-      where:  { salesOrderId },
-      update: { khaltiPidx: data.pidx, status: "PENDING" },
+      where: { salesOrderId },
+      update: {
+        khaltiPidx: data.pidx,
+        status: "PENDING",
+        platform: platform,
+      },
       create: {
         salesOrderId,
-        method: "KHALTI",
+        method: "ONLINE",
+        platform: platform,
         status: "PENDING",
         amount: order.totalAmount || 0,
         khaltiPidx: data.pidx,
       },
     });
 
-    await logAction(req.user.id, "INITIATE_PAYMENT", "Payment", salesOrderId, { pidx: data.pidx });
+    await logAction(req.user.id, "INITIATE_PAYMENT", "Payment", salesOrderId, {
+      pidx: data.pidx,
+      platform,
+    });
 
     res.json({
-      pidx:        data.pidx,
+      pidx: data.pidx,
       payment_url: data.payment_url,
-      expiresAt:   data.expires_at,
+      expiresAt: data.expires_at,
+      platform,
     });
   } catch (err) {
     const message = err.response?.data?.detail || err.message;
@@ -75,7 +81,6 @@ export const initiatePayment = async (req, res) => {
 };
 
 // ── POST /api/payments/verify ─────────────────────────────────────────────────
-// body: { pidx }  (Khalti redirects with ?pidx=... on return_url)
 export const verifyPayment = async (req, res) => {
   try {
     const { pidx } = req.body;
@@ -92,9 +97,10 @@ export const verifyPayment = async (req, res) => {
     const payment = await prisma.payment.update({
       where: { khaltiPidx: pidx },
       data: {
-        status:              "COMPLETED",
+        status: "COMPLETED",
         khaltiTransactionId: data.transaction_id,
-        verifiedAt:          new Date(),
+        platformTransactionId: data.transaction_id,
+        verifiedAt: new Date(),
       },
       include: {
         salesOrder: {
@@ -103,13 +109,11 @@ export const verifyPayment = async (req, res) => {
       },
     });
 
-    // Update sales order status to PROCESSING
     await prisma.salesOrder.update({
       where: { id: payment.salesOrderId },
-      data:  { status: "PROCESSING" },
+      data: { status: "PROCESSING" },
     });
 
-    // Email receipt to customer
     if (payment.salesOrder.customer.email) {
       await sendEmail(
         payment.salesOrder.customer.email,
@@ -124,12 +128,14 @@ export const verifyPayment = async (req, res) => {
 
     await logAction(req.user.id, "VERIFY_PAYMENT", "Payment", payment.id, {
       transactionId: data.transaction_id,
+      platform: payment.platform,
     });
 
     res.json({
-      message:       "Payment verified successfully.",
+      message: "Payment verified successfully.",
       transactionId: data.transaction_id,
-      amount:        data.total_amount,
+      amount: data.total_amount,
+      platform: payment.platform,
       payment,
     });
   } catch (err) {
@@ -142,8 +148,16 @@ export const verifyPayment = async (req, res) => {
 export const getPaymentByOrder = async (req, res) => {
   try {
     const payment = await prisma.payment.findUnique({
-      where:   { salesOrderId: req.params.salesOrderId },
-      include: { salesOrder: { select: { orderNumber: true, totalAmount: true, status: true } } },
+      where: { salesOrderId: req.params.salesOrderId },
+      include: {
+        salesOrder: {
+          select: {
+            orderNumber: true,
+            totalAmount: true,
+            status: true,
+          },
+        },
+      },
     });
     if (!payment) return res.status(404).json({ message: "No payment record found." });
     res.json(payment);

@@ -4,47 +4,24 @@ import { notificationsApi } from "@/api/index.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.jsx";
 import { Button } from "@/components/ui/button.jsx";
 import { Input } from "@/components/ui/input.jsx";
-import { Label } from "@/components/ui/label.jsx";
 import { Badge } from "@/components/ui/badge.jsx";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs.jsx";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.jsx";
 import { Separator } from "@/components/ui/separator.jsx";
 import { Switch } from "@/components/ui/switch.jsx";
 import {
-  Bell,
-  CheckCheck,
-  Trash2,
-  Mail,
-  Search,
-  X,
-  AlertCircle,
-  CreditCard,
-  Package,
-  Truck,
-  ShoppingBag,
-  Users,
-  Settings,
-  RefreshCw,
-  ChevronLeft,
-  ChevronRight,
-  Send,
-  Clock,
-  DollarSign,
-  BellRing,
-  Smartphone,
-  Globe,
-  Shield,
-  TrendingUp,
-  FileText,
+  Bell, CheckCheck, Trash2, Mail, Search, X, AlertCircle,
+  CreditCard, Package, Truck, ShoppingBag, Users, Settings,
+  RefreshCw, ChevronLeft, ChevronRight, Send, Clock, DollarSign,
+  BellRing, Smartphone, Globe, Shield
 } from "lucide-react";
 import { toast } from "sonner";
-import { formatDistanceToNow, formatDate, formatDateTime } from "@/utils/helpers.js";
+import { formatDistanceToNow, formatDate } from "@/utils/helpers.js";
 
 const NOTIFICATION_TYPES = [
   { value: "all", label: "All", icon: Bell, color: "text-gray-500" },
   { value: "LOW_STOCK", label: "Low Stock", icon: AlertCircle, color: "text-red-500" },
   { value: "CREDIT_DUE", label: "Credit Due", icon: CreditCard, color: "text-orange-500" },
   { value: "ORDER_UPDATE", label: "Order Update", icon: ShoppingBag, color: "text-blue-500" },
-  { value: "SUPPLIER_DELAY", label: "Supplier Delay", icon: Truck, color: "text-yellow-500" },
   { value: "PAYMENT_RECEIVED", label: "Payment", icon: DollarSign, color: "text-green-500" },
   { value: "APPROVAL_REQUEST", label: "Approval", icon: Users, color: "text-purple-500" },
   { value: "SYSTEM_WARNING", label: "System", icon: Shield, color: "text-gray-500" },
@@ -82,6 +59,7 @@ export default function ManagerNotifications() {
     emailNotifications: true,
     smsNotifications: false,
     inAppNotifications: true,
+    pushNotifications: true,
     lowStockAlerts: true,
     creditDueAlerts: true,
     supplierDelayAlerts: true,
@@ -187,7 +165,7 @@ export default function ManagerNotifications() {
   };
 
   const deleteAllRead = async () => {
-    if (!confirm("Delete all read notifications? This cannot be undone.")) return;
+    if (!window.confirm("Delete all read notifications? This cannot be undone.")) return;
     try {
       await notificationsApi.deleteAllRead();
       fetchNotifications();
@@ -250,18 +228,13 @@ export default function ManagerNotifications() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-start">
+      <div className="flex justify-between items-start flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Notifications</h1>
           <p className="text-gray-600 mt-1">Real-time alerts, approvals, and system updates</p>
         </div>
-        <div className="flex gap-2">
-          <Button
-            onClick={() => setShowPreferences(!showPreferences)}
-            variant="outline"
-            size="sm"
-            className="gap-2"
-          >
+        <div className="flex gap-2 flex-wrap">
+          <Button onClick={() => setShowPreferences(!showPreferences)} variant="outline" size="sm" className="gap-2">
             <Settings className="h-4 w-4" />
             Preferences
           </Button>
@@ -273,7 +246,7 @@ export default function ManagerNotifications() {
             <Trash2 className="h-4 w-4" />
             Clear read
           </Button>
-          <Button onClick={fetchNotifications} variant="outline" size="sm" className="gap-2">
+          <Button onClick={() => { fetchNotifications(); fetchStats(); }} variant="outline" size="sm" className="gap-2">
             <RefreshCw className="h-4 w-4" />
             Refresh
           </Button>
@@ -284,7 +257,7 @@ export default function ManagerNotifications() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
         <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
           <CardContent className="p-4">
-            <p className="text-xs text-blue-600 font-medium">Total Sent</p>
+            <p className="text-xs text-blue-600 font-medium">Total</p>
             <p className="text-2xl font-bold text-blue-700">{stats.total || 0}</p>
           </CardContent>
         </Card>
@@ -294,22 +267,22 @@ export default function ManagerNotifications() {
             <p className="text-2xl font-bold text-green-700">{stats.emailSent || 0}</p>
           </CardContent>
         </Card>
-        <Card className="bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200">
-          <CardContent className="p-4">
-            <p className="text-xs text-purple-600 font-medium">SMS Sent</p>
-            <p className="text-2xl font-bold text-purple-700">0</p>
-          </CardContent>
-        </Card>
         <Card className="bg-gradient-to-br from-red-50 to-red-100 border-red-200">
           <CardContent className="p-4">
-            <p className="text-xs text-red-600 font-medium">Critical Alerts</p>
+            <p className="text-xs text-red-600 font-medium">Critical</p>
             <p className="text-2xl font-bold text-red-700">{stats.critical || 0}</p>
           </CardContent>
         </Card>
         <Card className="bg-gradient-to-br from-amber-50 to-amber-100 border-amber-200">
           <CardContent className="p-4">
-            <p className="text-xs text-amber-600 font-medium">Last 7 Days</p>
-            <p className="text-2xl font-bold text-amber-700">{stats.last7Days || 0}</p>
+            <p className="text-xs text-amber-600 font-medium">Warning</p>
+            <p className="text-2xl font-bold text-amber-700">{stats.warning || 0}</p>
+          </CardContent>
+        </Card>
+        <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
+          <CardContent className="p-4">
+            <p className="text-xs text-blue-600 font-medium">Info</p>
+            <p className="text-2xl font-bold text-blue-700">{stats.info || 0}</p>
           </CardContent>
         </Card>
         <Card className="bg-gradient-to-br from-indigo-50 to-indigo-100 border-indigo-200">
@@ -337,47 +310,35 @@ export default function ManagerNotifications() {
           <CardContent className="p-5 space-y-5">
             {/* Channel Preferences */}
             <div>
-              <h4 className="text-sm font-semibold text-gray-800 mb-3">Notification Channels</h4>
+              <h4 className="text-sm font-semibold text-gray-800 mb-3">Channels</h4>
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div className="flex items-center gap-2">
                     <Mail className="h-4 w-4 text-blue-500" />
                     <span className="text-sm">Email</span>
                   </div>
-                  <Switch
-                    checked={preferences.emailNotifications}
-                    onCheckedChange={(val) => setPreferences({ ...preferences, emailNotifications: val })}
-                  />
+                  <Switch checked={preferences.emailNotifications} onCheckedChange={(val) => setPreferences({ ...preferences, emailNotifications: val })} />
                 </div>
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div className="flex items-center gap-2">
                     <Smartphone className="h-4 w-4 text-green-500" />
                     <span className="text-sm">SMS</span>
                   </div>
-                  <Switch
-                    checked={preferences.smsNotifications}
-                    onCheckedChange={(val) => setPreferences({ ...preferences, smsNotifications: val })}
-                  />
+                  <Switch checked={preferences.smsNotifications} onCheckedChange={(val) => setPreferences({ ...preferences, smsNotifications: val })} />
                 </div>
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div className="flex items-center gap-2">
                     <Globe className="h-4 w-4 text-purple-500" />
                     <span className="text-sm">In-App</span>
                   </div>
-                  <Switch
-                    checked={preferences.inAppNotifications}
-                    onCheckedChange={(val) => setPreferences({ ...preferences, inAppNotifications: val })}
-                  />
+                  <Switch checked={preferences.inAppNotifications} onCheckedChange={(val) => setPreferences({ ...preferences, inAppNotifications: val })} />
                 </div>
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div className="flex items-center gap-2">
                     <Bell className="h-4 w-4 text-amber-500" />
                     <span className="text-sm">Push</span>
                   </div>
-                  <Switch
-                    checked={preferences.pushNotifications}
-                    onCheckedChange={(val) => setPreferences({ ...preferences, pushNotifications: val })}
-                  />
+                  <Switch checked={preferences.pushNotifications} onCheckedChange={(val) => setPreferences({ ...preferences, pushNotifications: val })} />
                 </div>
               </div>
             </div>
@@ -386,63 +347,23 @@ export default function ManagerNotifications() {
 
             {/* Alert Types */}
             <div>
-              <h4 className="text-sm font-semibold text-gray-800 mb-3">Alert Configuration</h4>
+              <h4 className="text-sm font-semibold text-gray-800 mb-3">Alert Types</h4>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                 <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
-                  <span className="text-sm">Low Stock Alerts</span>
-                  <Switch
-                    checked={preferences.lowStockAlerts}
-                    onCheckedChange={(val) => setPreferences({ ...preferences, lowStockAlerts: val })}
-                  />
+                  <span className="text-sm">Low Stock</span>
+                  <Switch checked={preferences.lowStockAlerts} onCheckedChange={(val) => setPreferences({ ...preferences, lowStockAlerts: val })} />
                 </div>
                 <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
-                  <span className="text-sm">Credit Due Alerts</span>
-                  <Switch
-                    checked={preferences.creditDueAlerts}
-                    onCheckedChange={(val) => setPreferences({ ...preferences, creditDueAlerts: val })}
-                  />
-                </div>
-                <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
-                  <span className="text-sm">Supplier Delay Alerts</span>
-                  <Switch
-                    checked={preferences.supplierDelayAlerts}
-                    onCheckedChange={(val) => setPreferences({ ...preferences, supplierDelayAlerts: val })}
-                  />
+                  <span className="text-sm">Credit Due</span>
+                  <Switch checked={preferences.creditDueAlerts} onCheckedChange={(val) => setPreferences({ ...preferences, creditDueAlerts: val })} />
                 </div>
                 <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
                   <span className="text-sm">Order Updates</span>
-                  <Switch
-                    checked={preferences.orderUpdates}
-                    onCheckedChange={(val) => setPreferences({ ...preferences, orderUpdates: val })}
-                  />
+                  <Switch checked={preferences.orderUpdates} onCheckedChange={(val) => setPreferences({ ...preferences, orderUpdates: val })} />
                 </div>
                 <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
                   <span className="text-sm">System Warnings</span>
-                  <Switch
-                    checked={preferences.systemWarnings}
-                    onCheckedChange={(val) => setPreferences({ ...preferences, systemWarnings: val })}
-                  />
-                </div>
-                <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
-                  <span className="text-sm">Approval Requests</span>
-                  <Switch
-                    checked={preferences.approvalRequests}
-                    onCheckedChange={(val) => setPreferences({ ...preferences, approvalRequests: val })}
-                  />
-                </div>
-                <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
-                  <span className="text-sm">Stock Adjustments</span>
-                  <Switch
-                    checked={preferences.stockAdjustments}
-                    onCheckedChange={(val) => setPreferences({ ...preferences, stockAdjustments: val })}
-                  />
-                </div>
-                <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
-                  <span className="text-sm">Delivery Updates</span>
-                  <Switch
-                    checked={preferences.deliveryUpdates}
-                    onCheckedChange={(val) => setPreferences({ ...preferences, deliveryUpdates: val })}
-                  />
+                  <Switch checked={preferences.systemWarnings} onCheckedChange={(val) => setPreferences({ ...preferences, systemWarnings: val })} />
                 </div>
               </div>
             </div>
@@ -457,7 +378,7 @@ export default function ManagerNotifications() {
         </Card>
       )}
 
-      {/* Filters Section */}
+      {/* Filters */}
       <Card>
         <CardContent className="p-4">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -465,16 +386,10 @@ export default function ManagerNotifications() {
               {tabs.map((tab) => {
                 const Icon = tab.icon;
                 return (
-                  <TabsTrigger
-                    key={tab.id}
-                    value={tab.id}
-                    className="data-[state=active]:bg-emerald-100 data-[state=active]:text-emerald-700 gap-2"
-                  >
+                  <TabsTrigger key={tab.id} value={tab.id} className="data-[state=active]:bg-emerald-100 data-[state=active]:text-emerald-700 gap-2">
                     <Icon className="h-4 w-4" />
                     {tab.label}
-                    <Badge variant="secondary" className="text-xs ml-1">
-                      {tab.count}
-                    </Badge>
+                    <Badge variant="secondary" className="text-xs ml-1">{tab.count}</Badge>
                   </TabsTrigger>
                 );
               })}
@@ -486,12 +401,7 @@ export default function ManagerNotifications() {
           <div className="flex flex-wrap gap-3 items-center">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                placeholder="Search notifications..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9"
-              />
+              <Input placeholder="Search notifications..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
               {searchTerm && (
                 <button onClick={() => setSearchTerm("")} className="absolute right-3 top-1/2 -translate-y-1/2">
                   <X className="h-4 w-4 text-gray-400 hover:text-gray-600" />
@@ -499,21 +409,13 @@ export default function ManagerNotifications() {
               )}
             </div>
 
-            <select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"
-            >
+            <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
               {NOTIFICATION_TYPES.map((type) => (
                 <option key={type.value} value={type.value}>{type.label}</option>
               ))}
             </select>
 
-            <select
-              value={priorityFilter}
-              onChange={(e) => setPriorityFilter(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"
-            >
+            <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
               <option value="all">All Priorities</option>
               <option value="CRITICAL">Critical</option>
               <option value="WARNING">Warning</option>
@@ -521,13 +423,8 @@ export default function ManagerNotifications() {
             </select>
 
             {(typeFilter !== "all" || priorityFilter !== "all" || searchTerm) && (
-              <Button variant="ghost" size="sm" onClick={() => {
-                setTypeFilter("all");
-                setPriorityFilter("all");
-                setSearchTerm("");
-              }} className="text-gray-500">
-                <X className="h-4 w-4 mr-1" />
-                Clear
+              <Button variant="ghost" size="sm" onClick={() => { setTypeFilter("all"); setPriorityFilter("all"); setSearchTerm(""); }} className="text-gray-500">
+                <X className="h-4 w-4 mr-1" /> Clear
               </Button>
             )}
           </div>
@@ -612,7 +509,7 @@ export default function ManagerNotifications() {
 
       {/* Pagination */}
       {pagination.pages > 1 && (
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <p className="text-sm text-gray-500">
             Showing {(pagination.page - 1) * pagination.limit + 1} to{" "}
             {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}

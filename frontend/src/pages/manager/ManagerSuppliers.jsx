@@ -13,6 +13,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner.jsx";
 import { Search, Plus, Edit, Eye, Star, StarHalf, ChevronLeft, ChevronRight, Filter, X, Package, Factory, Droplet, Box, FlaskConical, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency, formatDate } from "@/utils/helpers.js";
+import { useNavigation } from "@/hooks/useNavigation.js";
 
 const STATUS_COLORS = {
   Active: "bg-green-100 text-green-700",
@@ -39,6 +40,7 @@ const getCategoryIcon = (category) => {
 
 export default function ManagerSuppliers() {
   const navigate = useNavigate();
+  const { isAdmin, navigateTo, getBasePath } = useNavigation();
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -55,6 +57,8 @@ export default function ManagerSuppliers() {
     lowVolume: 0
   });
   const [rawMaterialCategories, setRawMaterialCategories] = useState([]);
+
+  const basePath = getBasePath();
 
   useEffect(() => {
     fetchSuppliers();
@@ -149,6 +153,14 @@ export default function ManagerSuppliers() {
     );
   };
 
+  const handleNavigate = (path) => {
+    if (isAdmin()) {
+      navigate(`/admin${path}`);
+    } else {
+      navigate(`/manager${path}`);
+    }
+  };
+
   return (
     <div className="space-y-5">
       <PageHeader 
@@ -156,7 +168,7 @@ export default function ManagerSuppliers() {
         description="Manage supplier relationships and track performance by raw material category"
         actionLabel="Add Supplier"
         actionIcon={Plus}
-        onAction={() => navigate("/manager/suppliers/new")}
+        onAction={() => handleNavigate("/suppliers/new")}
       />
 
       {/* Stats Cards */}
@@ -275,7 +287,7 @@ export default function ManagerSuppliers() {
                       <TableRow 
                         key={supplier.id} 
                         className="hover:bg-gray-50 cursor-pointer" 
-                        onClick={() => navigate(`/manager/suppliers/${supplier.id}`)}
+                        onClick={() => handleNavigate(`/suppliers/${supplier.id}`)}
                       >
                         <TableCell className="font-medium">{supplier.name}</TableCell>
                         <TableCell className="text-sm">{supplier.contactPerson || "—"}</TableCell>
@@ -307,10 +319,10 @@ export default function ManagerSuppliers() {
                         </TableCell>
                         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1">
-                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => navigate(`/manager/suppliers/${supplier.id}/edit`)}>
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => handleNavigate(`/suppliers/${supplier.id}/edit`)}>
                               <Edit className="h-4 w-4" />
                             </Button>
-                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => navigate(`/manager/suppliers/${supplier.id}`)}>
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => handleNavigate(`/suppliers/${supplier.id}`)}>
                               <Eye className="h-4 w-4" />
                             </Button>
                           </div>

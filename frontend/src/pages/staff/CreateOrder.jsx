@@ -1,7 +1,7 @@
 // src/pages/staff/CreateOrder.jsx
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
-import { TrashIcon, CreditCard, Banknote, Wallet, Clock, AlertTriangle, Upload, Search, UserPlus, X } from "lucide-react";
+import { TrashIcon, CreditCard, Banknote, Wallet, Clock, AlertTriangle, Upload, Search, UserPlus, X, Calendar as CalendarIcon } from "lucide-react";
 import { productsApi, customersApi, salesOrdersApi, creditApi } from "@/api/index.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.jsx";
 import { Button } from "@/components/ui/button.jsx";
@@ -23,10 +23,16 @@ export default function CreateOrder() {
   const [loading, setLoading] = useState(false);
   const [cashAmountReceived, setCashAmountReceived] = useState("");
   const [cashBalanceReturned, setCashBalanceReturned] = useState(0);
-  const [onlineGateway, setOnlineGateway] = useState("eSewa");
+  const [onlineGateway, setOnlineGateway] = useState("KHALTI");
   const [onlineTransactionId, setOnlineTransactionId] = useState("");
   const [onlineScreenshot, setOnlineScreenshot] = useState(null);
   const [creditRemarks, setCreditRemarks] = useState("");
+  const [quantityErrors, setQuantityErrors] = useState({});
+  
+  // Credit Due Date state
+  const [creditDueDate, setCreditDueDate] = useState(
+    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+  );
   
   // Customer search states
   const [existingCustomerId, setExistingCustomerId] = useState(null);
@@ -51,11 +57,10 @@ export default function CreateOrder() {
   const watchAddress = watch("address");
   const watchDeliveryAddress = watch("deliveryAddress");
 
-  // ✅ DEFINE calculateTotal FIRST before using it
   const calculateTotal = () => {
     return selectedProducts.reduce((total, item) => {
-      if (item.product && item.quantity) {
-        return total + (item.product.sellingPrice || 0) * item.quantity;
+      if (item.product && item.quantity && item.quantity > 0) {
+        return total + (item.product.sellingPrice || 0) * (item.quantity || 0);
       }
       return total;
     }, 0);
@@ -87,9 +92,10 @@ export default function CreateOrder() {
     }
   }, [cashAmountReceived, totalAmount]);
 
+  // ✅ Fetch only active (non-archived) products
   const fetchProducts = async () => {
     try {
-      const response = await productsApi.getAll();
+      const response = await productsApi.getActive();
       setProducts(response.data || []);
     } catch (error) {
       console.error("Failed to fetch products:", error);
@@ -186,10 +192,14 @@ export default function CreateOrder() {
 
   const addProduct = () => {
     setSelectedProducts([...selectedProducts, { productId: "", quantity: 1, product: null }]);
+    setQuantityErrors({});
   };
 
   const removeProduct = (index) => {
     setSelectedProducts(selectedProducts.filter((_, i) => i !== index));
+    const newErrors = { ...quantityErrors };
+    delete newErrors[index];
+    setQuantityErrors(newErrors);
   };
 
   const updateProduct = (index, field, value) => {
@@ -203,9 +213,95 @@ export default function CreateOrder() {
       }
     }
     setSelectedProducts(updated);
+    
+    if (field === "productId") {
+      const newErrors = { ...quantityErrors };
+      delete newErrors[index];
+      setQuantityErrors(newErrors);
+    }
+  };
+
+  const handleQuantityChange = (index, value) => {
+    const updated = [...selectedProducts];
+    
+    if (value === '') {
+      updated[index].quantity = '';
+    } else {
+      const numValue = parseInt(value);
+      if (!isNaN(numValue) && numValue >= 0) {
+        updated[index].quantity = numValue;
+      } else {
+        return;
+      }
+    }
+    setSelectedProducts(updated);
+    validateQuantity(index, updated[index].quantity);
+  };
+
+  const validateQuantity = (index, quantity) => {
+    const newErrors = { ...quantityErrors };
+    
+    if (quantity === '' || quantity === undefined || quantity === null) {
+      newErrors[index] = 'Quantity is required';
+      setQuantityErrors(newErrors);
+      return false;
+    }
+    
+    const numQty = parseInt(quantity);
+    if (isNaN(numQty) || numQty <= 0) {
+      newErrors[index] = 'Quantity must be greater than 0';
+      setQuantityErrors(newErrors);
+      return false;
+    }
+    
+    if (!selectedProducts[index]?.productId) {
+      newErrors[index] = 'Please select a product first';
+      setQuantityErrors(newErrors);
+      return false;
+    }
+    
+    delete newErrors[index];
+    setQuantityErrors(newErrors);
+    return true;
+  };
+
+  const validateAllQuantities = () => {
+    let isValid = true;
+    const newErrors = {};
+    
+    selectedProducts.forEach((item, index) => {
+      const qty = item.quantity;
+      
+      if (!item.productId) {
+        newErrors[index] = 'Please select a product';
+        isValid = false;
+        return;
+      }
+      
+      if (qty === '' || qty === undefined || qty === null) {
+        newErrors[index] = 'Quantity is required';
+        isValid = false;
+        return;
+      }
+      
+      const numQty = parseInt(qty);
+      if (isNaN(numQty) || numQty <= 0) {
+        newErrors[index] = 'Quantity must be greater than 0';
+        isValid = false;
+        return;
+      }
+    });
+    
+    setQuantityErrors(newErrors);
+    return isValid;
   };
 
   const validateOrder = () => {
+    if (!validateAllQuantities()) {
+      toast.error("Please fix quantity errors before proceeding");
+      return false;
+    }
+    
     if (selectedProducts.length === 0) {
       toast.error("Please add at least one product");
       return false;
@@ -232,6 +328,14 @@ export default function CreateOrder() {
       return false;
     }
     
+    // ✅ Address is optional - no validation needed
+    
+    // ✅ Delivery address is required ONLY if delivery is required
+    if (deliveryRequired && !watchDeliveryAddress) {
+      toast.error("Please enter delivery address");
+      return false;
+    }
+    
     if (paymentMethod === "CASH" && cashAmountReceived) {
       const received = parseFloat(cashAmountReceived);
       if (received < totalAmount) {
@@ -242,6 +346,11 @@ export default function CreateOrder() {
     
     if (paymentMethod === "ONLINE" && !onlineTransactionId) {
       toast.error("Please enter transaction ID for online payment");
+      return false;
+    }
+    
+    if (paymentMethod === "CREDIT" && !creditDueDate) {
+      toast.error("Please select a due date for credit payment");
       return false;
     }
     
@@ -257,18 +366,20 @@ export default function CreateOrder() {
       customerId: existingCustomerId,
       customerName: data.customerName,
       phoneNumber: data.phoneNumber,
-      address: data.address,
-      deliveryAddress: deliveryRequired ? (data.deliveryAddress || data.address) : null,
+      address: data.address || null, // ✅ Optional - can be null
+      deliveryAddress: deliveryRequired ? data.deliveryAddress : null, // ✅ Required only if delivery is required
       customerType: data.customerType,
       items: selectedProducts.map(item => ({
         productId: item.productId,
-        quantity: parseInt(item.quantity),
+        quantity: parseInt(item.quantity) || 1,
         unitPrice: item.product.sellingPrice,
       })),
       paymentType: paymentMethod,
       deliveryRequired,
-      orderNotes: data.orderNotes,
-      totalAmount: totalAmount,
+      notes: data.orderNotes,
+      paymentPlatform: paymentMethod === "ONLINE" ? onlineGateway : null,
+      platformTransactionId: paymentMethod === "ONLINE" ? onlineTransactionId : null,
+      creditDueDate: paymentMethod === "CREDIT" ? creditDueDate : null,
       paymentDetails: {
         cashReceived: paymentMethod === "CASH" ? parseFloat(cashAmountReceived) : null,
         cashBalance: paymentMethod === "CASH" ? cashBalanceReturned : null,
@@ -276,6 +387,7 @@ export default function CreateOrder() {
         transactionId: paymentMethod === "ONLINE" ? onlineTransactionId : null,
         screenshot: paymentMethod === "ONLINE" ? onlineScreenshot : null,
         remarks: paymentMethod === "CREDIT" ? creditRemarks : null,
+        dueDate: paymentMethod === "CREDIT" ? creditDueDate : null,
       },
     };
 
@@ -297,6 +409,8 @@ export default function CreateOrder() {
       setOnlineTransactionId("");
       setOnlineScreenshot(null);
       setCreditRemarks("");
+      setCreditDueDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]);
+      setQuantityErrors({});
       
     } catch (error) {
       console.error("Order creation error:", error);
@@ -340,6 +454,22 @@ export default function CreateOrder() {
 
   const showCreditWarning = paymentMethod === "CREDIT" && customerCreditInfo && customerCreditInfo.remainingBalance > 0;
   const availableCredit = (customerCreditInfo?.creditLimit || 0) - (customerCreditInfo?.remainingBalance || 0);
+
+  const onlineGateways = [
+    { value: "KHALTI", label: "Khalti" },
+    { value: "ESEWA", label: "eSewa" },
+    { value: "FONEPAY", label: "Fonepay" },
+    { value: "OTHER", label: "Other" },
+  ];
+
+  const getItemTotal = (item) => {
+    if (item.product && item.quantity && item.quantity > 0) {
+      return (item.product.sellingPrice || 0) * (item.quantity || 0);
+    }
+    return 0;
+  };
+
+  const hasQuantityErrors = Object.keys(quantityErrors).length > 0;
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -458,12 +588,13 @@ export default function CreateOrder() {
                   )}
                 </div>
                 <div className="sm:col-span-2">
-                  <Label className="text-sm font-medium text-gray-700">Address</Label>
+                  <Label className="text-sm font-medium text-gray-700">Address (Optional)</Label>
                   <Input
                     {...register("address")}
                     placeholder="Baneshwor, Kathmandu"
                     className="mt-1.5"
                   />
+                  <p className="text-xs text-gray-400 mt-1">Permanent/Default address - optional</p>
                 </div>
                 <div>
                   <Label className="text-sm font-medium text-gray-700">Customer Type</Label>
@@ -488,64 +619,101 @@ export default function CreateOrder() {
             </CardHeader>
             <CardContent className="pt-6">
               <div className="space-y-4">
-                <Label className="text-sm font-medium text-gray-700">Products</Label>
+                <div className="flex justify-between items-center">
+                  <Label className="text-sm font-medium text-gray-700">Products</Label>
+                  <Button
+                    type="button"
+                    onClick={addProduct}
+                    variant="outline"
+                    size="sm"
+                    className="border-violet-200 text-violet-600 hover:bg-violet-50"
+                  >
+                    + Add Product
+                  </Button>
+                </div>
                 
-                {selectedProducts.map((item, index) => (
-                  <div key={index} className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                    <div className="flex-1 min-w-[180px]">
-                      <Label className="text-xs text-gray-500">Product</Label>
-                      <select
-                        value={item.productId}
-                        onChange={(e) => updateProduct(index, "productId", e.target.value)}
-                        className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                {selectedProducts.map((item, index) => {
+                  const hasError = quantityErrors[index];
+                  
+                  return (
+                    <div key={index} className={`flex flex-wrap items-end gap-3 rounded-lg border p-4 ${
+                      hasError ? 'border-red-300 bg-red-50' : 'border-gray-200 bg-gray-50'
+                    }`}>
+                      <div className="flex-1 min-w-[180px]">
+                        <Label className="text-xs text-gray-500">Product</Label>
+                        <select
+                          value={item.productId}
+                          onChange={(e) => updateProduct(index, "productId", e.target.value)}
+                          className={`mt-1 block w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-1 ${
+                            hasError && !item.productId 
+                              ? 'border-red-300 focus:border-red-500 focus:ring-red-500' 
+                              : 'border-gray-300 focus:border-violet-500 focus:ring-violet-500'
+                          }`}
+                        >
+                          <option value="">Select Product</option>
+                          {products.map(product => (
+                            <option key={product.id} value={product.id}>
+                              {product.name} - {formatCurrency(product.sellingPrice)} / {product.unit}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="w-28">
+                        <Label className="text-xs text-gray-500">Quantity</Label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={item.quantity === '' ? '' : item.quantity}
+                          onChange={(e) => handleQuantityChange(index, e.target.value)}
+                          className={`mt-1 block w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
+                            hasError 
+                              ? 'border-red-300 focus:border-red-500 focus:ring-red-500' 
+                              : 'border-gray-300 focus:border-violet-500 focus:ring-violet-500'
+                          }`}
+                          placeholder="1"
+                        />
+                        {hasError && (
+                          <p className="mt-1 text-xs text-red-600">{quantityErrors[index]}</p>
+                        )}
+                      </div>
+                      <div className="w-28">
+                        <Label className="text-xs text-gray-500">Unit Price</Label>
+                        <p className="mt-1 text-sm font-medium text-gray-900">
+                          {formatCurrency(item.product?.sellingPrice || 0)}
+                        </p>
+                      </div>
+                      <div className="w-32">
+                        <Label className="text-xs text-gray-500">Total</Label>
+                        <p className="mt-1 text-sm font-semibold text-violet-600">
+                          {formatCurrency(getItemTotal(item))}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeProduct(index)}
+                        className="mt-5 rounded-lg p-2 text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors"
                       >
-                        <option value="">Select Product</option>
-                        {products.map(product => (
-                          <option key={product.id} value={product.id}>
-                            {product.name} - {formatCurrency(product.sellingPrice)} / {product.unit}
-                          </option>
-                        ))}
-                      </select>
+                        <TrashIcon className="h-5 w-5" />
+                      </button>
                     </div>
-                    <div className="w-28">
-                      <Label className="text-xs text-gray-500">Quantity</Label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={item.quantity}
-                        onChange={(e) => updateProduct(index, "quantity", parseInt(e.target.value) || 1)}
-                        className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500"
-                      />
-                    </div>
-                    <div className="w-28">
-                      <Label className="text-xs text-gray-500">Unit Price</Label>
-                      <p className="mt-1 text-sm font-medium text-gray-900">
-                        {formatCurrency(item.product?.sellingPrice || 0)}
-                      </p>
-                    </div>
-                    <div className="w-32">
-                      <Label className="text-xs text-gray-500">Total</Label>
-                      <p className="mt-1 text-sm font-semibold text-violet-600">
-                        {formatCurrency((item.product?.sellingPrice || 0) * item.quantity)}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => removeProduct(index)}
-                      className="mt-5 rounded-lg p-2 text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors"
-                    >
-                      <TrashIcon className="h-5 w-5" />
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
                 
-                <button
-                  type="button"
-                  onClick={addProduct}
-                  className="w-full rounded-lg border-2 border-dashed border-gray-300 py-3 text-center text-sm font-medium text-gray-600 hover:border-violet-500 hover:text-violet-600 transition-colors"
-                >
-                  + Add Product
-                </button>
+                {selectedProducts.length === 0 && (
+                  <div className="text-center py-8 border-2 border-dashed border-gray-200 rounded-lg">
+                    <p className="text-gray-500">No products added yet</p>
+                    <p className="text-sm text-gray-400 mt-1">Click "Add Product" to start</p>
+                  </div>
+                )}
+
+                {hasQuantityErrors && (
+                  <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-sm text-red-600 flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4" />
+                      Please fix the highlighted quantity errors before proceeding
+                    </p>
+                  </div>
+                )}
               </div>
 
               <Separator className="my-6" />
@@ -558,7 +726,10 @@ export default function CreateOrder() {
                       <input
                         type="radio"
                         checked={deliveryRequired}
-                        onChange={() => setDeliveryRequired(true)}
+                        onChange={() => {
+                          setDeliveryRequired(true);
+                          // Clear delivery address error when enabling delivery
+                        }}
                         className="h-4 w-4 text-violet-600 focus:ring-violet-500"
                       />
                       <span className="text-sm text-gray-700">Yes</span>
@@ -567,25 +738,39 @@ export default function CreateOrder() {
                       <input
                         type="radio"
                         checked={!deliveryRequired}
-                        onChange={() => setDeliveryRequired(false)}
+                        onChange={() => {
+                          setDeliveryRequired(false);
+                          // Clear delivery address when not required
+                          setValue("deliveryAddress", "");
+                        }}
                         className="h-4 w-4 text-violet-600 focus:ring-violet-500"
                       />
                       <span className="text-sm text-gray-700">No</span>
                     </label>
                   </div>
+                  {!deliveryRequired && (
+                    <p className="text-xs text-gray-400 mt-1">Delivery address not required when delivery is not needed</p>
+                  )}
                 </div>
 
                 {deliveryRequired && (
                   <div>
-                    <Label className="text-sm font-medium text-gray-700">Delivery Address</Label>
+                    <Label className="text-sm font-medium text-gray-700">
+                      Delivery Address <span className="text-red-500">*</span>
+                    </Label>
                     <Textarea
-                      {...register("deliveryAddress")}
+                      {...register("deliveryAddress", { 
+                        required: deliveryRequired ? "Delivery address is required" : false 
+                      })}
                       rows={2}
                       placeholder="Enter delivery address"
                       className="mt-1.5"
                     />
-                    <p className="mt-1 text-xs text-gray-500">
-                      Leave empty to use customer's billing address
+                    {errors.deliveryAddress && (
+                      <p className="mt-1 text-sm text-red-600">{errors.deliveryAddress.message}</p>
+                    )}
+                    <p className="mt-1 text-xs text-gray-400">
+                      Required when delivery is needed
                     </p>
                   </div>
                 )}
@@ -617,7 +802,7 @@ export default function CreateOrder() {
                 <PaymentMethodCard icon={Banknote} title="Cash" description="Pay on delivery" value="CASH" />
                 <PaymentMethodCard icon={CreditCard} title="Online Payment" description="UPI / Card / Mobile Banking" value="ONLINE" />
                 <PaymentMethodCard icon={Wallet} title="Credit" description="Pay later (30 days)" value="CREDIT" />
-                <PaymentMethodCard icon={Clock} title="Pay later" description="Deferred payment" value="PAY_LATER" />
+                {/* ✅ Removed PAY_LATER option */}
               </div>
 
               {/* Cash Payment Details */}
@@ -670,23 +855,26 @@ export default function CreateOrder() {
                       <select
                         value={onlineGateway}
                         onChange={(e) => setOnlineGateway(e.target.value)}
-                        className="mt-1.5 block w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"
+                        className="mt-1.5 block w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                       >
-                        <option value="eSewa">eSewa</option>
-                        <option value="Khalti">Khalti</option>
-                        <option value="ConnectIPS">ConnectIPS</option>
-                        <option value="Mobile Banking">Mobile Banking</option>
-                        <option value="Card">Credit/Debit Card</option>
+                        {onlineGateways.map(gateway => (
+                          <option key={gateway.value} value={gateway.value}>
+                            {gateway.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div>
                       <Label className="text-sm text-blue-700">Transaction ID</Label>
                       <Input
-                        placeholder="TXN 908213"
+                        placeholder="Enter transaction ID from payment"
                         value={onlineTransactionId}
                         onChange={(e) => setOnlineTransactionId(e.target.value)}
                         className="mt-1.5 bg-white"
                       />
+                      <p className="mt-1 text-xs text-blue-500">
+                        This will be stored as platformTransactionId
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -713,54 +901,42 @@ export default function CreateOrder() {
                       <Wallet className="h-4 w-4" />
                       Credit Payment Details
                     </h4>
-                    <div className="space-y-3">
-                      <div className="flex justify-between py-2">
-                        <span className="text-sm text-purple-700">Credit Due Date</span>
-                        <span className="text-sm font-semibold text-purple-900">
-                          {new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}
-                        </span>
+                    <div className="space-y-4">
+                      <div>
+                        <Label className="text-sm text-purple-700">
+                          Due Date <span className="text-red-500">*</span>
+                        </Label>
+                        <div className="relative mt-1.5">
+                          <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                          <Input
+                            type="date"
+                            value={creditDueDate}
+                            onChange={(e) => setCreditDueDate(e.target.value)}
+                            className="pl-9 bg-white"
+                            min={new Date().toISOString().split("T")[0]}
+                          />
+                        </div>
+                        <p className="text-xs text-purple-500 mt-1">
+                          Customer must pay by this date. After this date, account becomes overdue.
+                        </p>
                       </div>
-                      <div className="flex justify-between py-2">
+
+                      <div className="flex justify-between py-2 border-t border-purple-100">
                         <span className="text-sm text-purple-700">Available Credit</span>
                         <span className="text-sm font-semibold text-green-600">
                           {formatCurrency(availableCredit)}
                         </span>
                       </div>
+
                       <div>
-                        <Label className="text-sm text-purple-700">Remarks</Label>
-                        <textarea
-                          value={creditRemarks}
+                        <Label className="text-sm text-purple-700">Remarks (Optional)</Label>
+                        <textarea                          value={creditRemarks}
                           onChange={(e) => setCreditRemarks(e.target.value)}
                           placeholder="Customer requested 30-day payment terms."
                           className="mt-1.5 w-full rounded-lg border border-purple-200 bg-white px-3 py-2 text-sm"
                           rows={2}
                         />
                       </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Pay Later Details */}
-              {paymentMethod === "PAY_LATER" && (
-                <div className="mt-6 rounded-xl border border-orange-200 bg-gradient-to-r from-orange-50 to-white p-5">
-                  <h4 className="font-semibold text-orange-800 mb-4 flex items-center gap-2">
-                    <Clock className="h-4 w-4" />
-                    Pay Later Details
-                  </h4>
-                  <div className="space-y-4">
-                    <div>
-                      <Label className="text-sm text-orange-700">Payment Terms</Label>
-                      <select className="mt-1.5 block w-full rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm">
-                        <option>End of Day</option>
-                        <option>Next Day</option>
-                        <option>Within 7 Days</option>
-                        <option>Custom Date</option>
-                      </select>
-                    </div>
-                    <div>
-                      <Label className="text-sm text-orange-700">Expected Payment Date</Label>
-                      <Input type="date" className="mt-1.5 bg-white" />
                     </div>
                   </div>
                 </div>
@@ -784,19 +960,51 @@ export default function CreateOrder() {
                   <dt className="text-gray-600">Total Products</dt>
                   <dd className="font-medium text-gray-900">{selectedProducts.length}</dd>
                 </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-600">Address</dt>
+                  <dd className="font-medium text-gray-900 truncate ml-4">{watchAddress || "Not provided"}</dd>
+                </div>
+                {deliveryRequired && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-600">Delivery Address</dt>
+                    <dd className="font-medium text-gray-900 truncate ml-4">{watchDeliveryAddress || "Not provided"}</dd>
+                  </div>
+                )}
                 <Separator className="my-2" />
                 <div className="flex justify-between pt-2">
                   <dt className="text-lg font-semibold text-gray-900">Total Amount</dt>
-                  <dd className="text-xl font-bold text-violet-600">{formatCurrency(totalAmount)}</dd>
+                  <dd className={`text-xl font-bold ${hasQuantityErrors ? 'text-red-500' : 'text-violet-600'}`}>
+                    {formatCurrency(totalAmount)}
+                  </dd>
                 </div>
+                {hasQuantityErrors && (
+                  <div className="flex justify-between">
+                    <dt className="text-sm text-red-500">⚠️ Errors</dt>
+                    <dd className="text-sm text-red-500">Please fix quantity errors</dd>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <dt className="text-gray-600">Payment Type</dt>
                   <dd className="font-medium text-gray-900">
                     {paymentMethod === "CASH" ? "Cash" : 
-                     paymentMethod === "ONLINE" ? "Online Payment" :
-                     paymentMethod === "CREDIT" ? "Credit" : "Pay Later"}
+                     paymentMethod === "ONLINE" ? `Online (${onlineGateway})` :
+                     paymentMethod === "CREDIT" ? "Credit" : "N/A"}
                   </dd>
                 </div>
+                {paymentMethod === "CREDIT" && creditDueDate && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-600">Due Date</dt>
+                    <dd className="font-medium text-gray-900 text-sm">
+                      {new Date(creditDueDate).toLocaleDateString()}
+                    </dd>
+                  </div>
+                )}
+                {paymentMethod === "ONLINE" && onlineTransactionId && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-600">Transaction ID</dt>
+                    <dd className="font-medium text-gray-900 text-sm">{onlineTransactionId}</dd>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <dt className="text-gray-600">Delivery Status</dt>
                   <dd className="font-medium text-gray-900">{deliveryRequired ? "Required" : "Not Required"}</dd>
@@ -806,15 +1014,24 @@ export default function CreateOrder() {
               <div className="mt-6 flex gap-3">
                 <Button
                   onClick={handleSubmit(onSubmit)}
-                  disabled={loading}
-                  className="flex-1 bg-violet-600 hover:bg-violet-700 text-white font-semibold py-2.5"
+                  disabled={loading || hasQuantityErrors}
+                  className={`flex-1 font-semibold py-2.5 ${
+                    hasQuantityErrors 
+                      ? 'bg-gray-400 cursor-not-allowed hover:bg-gray-400' 
+                      : 'bg-violet-600 hover:bg-violet-700 text-white'
+                  }`}
                 >
-                  {loading ? "Creating Order..." : "Confirm Order"}
+                  {loading ? "Creating Order..." : hasQuantityErrors ? "Fix Errors First" : "Confirm Order"}
                 </Button>
                 <Button variant="outline" className="flex-1 py-2.5">
                   Save Draft
                 </Button>
               </div>
+              {hasQuantityErrors && (
+                <p className="mt-2 text-xs text-red-500 text-center">
+                  Please fix the highlighted quantity errors before confirming
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>

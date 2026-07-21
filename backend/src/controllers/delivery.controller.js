@@ -1,13 +1,41 @@
 // src/controllers/delivery.controller.js
 import prisma from "../config/prisma.js";
 import { logAction } from "../utils/auditLog.js";
+import { createNotification } from "./notification.controller.js";
 
-// GET /api/deliveries
+// GET /api/deliveries - FIXED WITH SEARCH
 export const getAllDeliveries = async (req, res) => {
   try {
-    const { status, page = 1, limit = 20 } = req.query;
+    const { 
+      status, 
+      search,
+      page = 1, 
+      limit = 20 
+    } = req.query;
+    
     const skip = (Number(page) - 1) * Number(limit);
-    const where = { ...(status && { status }) };
+    
+    // Build where clause
+    let where = {};
+    
+    // Filter by status
+    if (status) {
+      where.status = status;
+    }
+    
+    // ✅ FIX: Add search functionality - search by order number, customer name, or phone
+    if (search) {
+      where = {
+        ...where,
+        salesOrder: {
+          OR: [
+            { orderNumber: { contains: search, mode: "insensitive" } },
+            { customer: { name: { contains: search, mode: "insensitive" } } },
+            { customer: { phone: { contains: search, mode: "insensitive" } } },
+          ]
+        }
+      };
+    }
 
     const [deliveries, total] = await Promise.all([
       prisma.delivery.findMany({
@@ -15,8 +43,22 @@ export const getAllDeliveries = async (req, res) => {
         include: {
           salesOrder: {
             include: {
-              customer: { select: { id: true, name: true, phone: true, address: true, deliveryAddress: true } },
-              items: { include: { product: { select: { id: true, name: true, unit: true } } } },
+              customer: { 
+                select: { 
+                  id: true, 
+                  name: true, 
+                  phone: true, 
+                  address: true, 
+                  deliveryAddress: true 
+                } 
+              },
+              items: { 
+                include: { 
+                  product: { 
+                    select: { id: true, name: true, unit: true } 
+                  } 
+                } 
+              },
               payment: true,
             },
           },
@@ -28,13 +70,21 @@ export const getAllDeliveries = async (req, res) => {
       prisma.delivery.count({ where }),
     ]);
 
-    res.json({ data: deliveries, total, page: Number(page), limit: Number(limit) });
+    // ✅ FIX: Return proper pagination with pages
+    res.json({ 
+      data: deliveries, 
+      total, 
+      page: Number(page), 
+      limit: Number(limit),
+      pages: Math.ceil(total / Number(limit))
+    });
   } catch (err) {
+    console.error("Error in getAllDeliveries:", err);
     res.status(500).json({ message: err.message });
   }
 };
 
-// GET /api/deliveries/kanban - For Kanban board view
+// GET /api/deliveries/kanban
 export const getDeliveriesKanban = async (req, res) => {
   try {
     const deliveries = await prisma.delivery.findMany({
@@ -78,6 +128,7 @@ export const getDeliveriesKanban = async (req, res) => {
 
     res.json(kanbanData);
   } catch (err) {
+    console.error("Error in getDeliveriesKanban:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -99,6 +150,7 @@ export const getDeliveryById = async (req, res) => {
     if (!delivery) return res.status(404).json({ message: "Delivery not found." });
     res.json(delivery);
   } catch (err) {
+    console.error("Error in getDeliveryById:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -116,7 +168,10 @@ export const createDelivery = async (req, res) => {
       return res.status(409).json({ message: "Delivery already exists for this order." });
     }
 
-    const salesOrder = await prisma.salesOrder.findUnique({ where: { id: salesOrderId } });
+    const salesOrder = await prisma.salesOrder.findUnique({ 
+      where: { id: salesOrderId },
+      include: { customer: { select: { name: true } } }
+    });
     if (!salesOrder) return res.status(404).json({ message: "Sales order not found." });
 
     const delivery = await prisma.delivery.create({
@@ -130,13 +185,26 @@ export const createDelivery = async (req, res) => {
     });
 
     await logAction(req.user.id, "CREATE", "Delivery", delivery.id, { salesOrderId });
+
+    // ✅ CREATE NOTIFICATION FOR NEW DELIVERY
+    await createNotification({
+      title: `📦 Delivery Created: ${salesOrder.orderNumber}`,
+      message: `Delivery created for Order #${salesOrder.orderNumber}. Customer: ${salesOrder.customer.name}. Status: PENDING.`,
+      type: 'DELIVERY_UPDATE',
+      priority: 'INFORMATION',
+      referenceId: salesOrderId,
+      referenceType: 'SalesOrder',
+      actionUrl: `/deliveries/${delivery.id}`,
+    });
+
     res.status(201).json(delivery);
   } catch (err) {
+    console.error("Error in createDelivery:", err);
     res.status(500).json({ message: err.message });
   }
 };
 
-// PATCH /api/deliveries/:id/status - Delivery staff updates status
+// PATCH /api/deliveries/:id/status
 export const updateDeliveryStatus = async (req, res) => {
   try {
     const { status } = req.body;
@@ -155,6 +223,7 @@ export const updateDeliveryStatus = async (req, res) => {
           include: {
             items: { include: { product: true } },
             payment: true,
+            customer: { select: { name: true, phone: true } },
           },
         },
       },
@@ -203,6 +272,17 @@ export const updateDeliveryStatus = async (req, res) => {
         where: { id: delivery.salesOrderId },
         data: { status: "DISPATCHED" },
       });
+
+      // ✅ CREATE NOTIFICATION FOR DISPATCH
+      await createNotification({
+        title: `🚚 Order Dispatched: ${delivery.salesOrder.orderNumber}`,
+        message: `Order #${delivery.salesOrder.orderNumber} has been DISPATCHED. Customer: ${delivery.salesOrder.customer.name}.`,
+        type: 'DELIVERY_UPDATE',
+        priority: 'INFORMATION',
+        referenceId: delivery.salesOrderId,
+        referenceType: 'SalesOrder',
+        actionUrl: `/deliveries/${delivery.id}`,
+      });
     }
     // When status changes to DELIVERED - COMPLETE ORDER
     else if (status === "DELIVERED" && delivery.status === "IN_TRANSIT") {
@@ -229,6 +309,17 @@ export const updateDeliveryStatus = async (req, res) => {
           data: { status: "COMPLETED", verifiedAt: new Date() },
         });
       }
+
+      // ✅ CREATE NOTIFICATION FOR DELIVERY COMPLETED
+      await createNotification({
+        title: `✅ Order Delivered: ${delivery.salesOrder.orderNumber}`,
+        message: `Order #${delivery.salesOrder.orderNumber} has been DELIVERED to ${delivery.salesOrder.customer.name}.`,
+        type: 'DELIVERY_UPDATE',
+        priority: 'INFORMATION',
+        referenceId: delivery.salesOrderId,
+        referenceType: 'SalesOrder',
+        actionUrl: `/deliveries/${delivery.id}`,
+      });
     }
     // Handle RETURNED
     else if (status === "RETURNED") {
@@ -267,6 +358,17 @@ export const updateDeliveryStatus = async (req, res) => {
           ]);
         }
       }
+
+      // ✅ CREATE NOTIFICATION FOR RETURN
+      await createNotification({
+        title: `↩️ Order Returned: ${delivery.salesOrder.orderNumber}`,
+        message: `Order #${delivery.salesOrder.orderNumber} has been RETURNED. Customer: ${delivery.salesOrder.customer.name}.`,
+        type: 'DELIVERY_UPDATE',
+        priority: 'WARNING',
+        referenceId: delivery.salesOrderId,
+        referenceType: 'SalesOrder',
+        actionUrl: `/deliveries/${delivery.id}`,
+      });
     } else {
       updatedDelivery = await prisma.delivery.update({
         where: { id: req.params.id },
@@ -277,7 +379,7 @@ export const updateDeliveryStatus = async (req, res) => {
     await logAction(req.user.id, "UPDATE_STATUS", "Delivery", updatedDelivery.id, { status });
     res.json({ delivery: updatedDelivery, order: updatedOrder });
   } catch (err) {
-    console.error(err);
+    console.error("Error in updateDeliveryStatus:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -345,6 +447,7 @@ export const getOrderHistory = async (req, res) => {
       },
     });
   } catch (err) {
+    console.error("Error in getOrderHistory:", err);
     res.status(500).json({ message: err.message });
   }
 };

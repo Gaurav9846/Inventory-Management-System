@@ -46,7 +46,12 @@ export default function ManagerStockAdjustments() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('pending');
-  const [stats, setStats] = useState({ pending: 0, approved: 0, rejected: 0, totalRequests: 0 });
+  const [stats, setStats] = useState({ 
+    pending: 0, 
+    approved: 0, 
+    rejected: 0, 
+    totalRequests: 0 
+  });
 
   useEffect(() => {
     fetchData();
@@ -57,7 +62,8 @@ export default function ManagerStockAdjustments() {
     try {
       // Fetch pending requests
       const pendingRes = await stockAdjustmentApi.getPending();
-      setPendingRequests(pendingRes.data?.data || pendingRes.data || []);
+      const pendingData = pendingRes.data?.data || pendingRes.data || [];
+      setPendingRequests(pendingData);
       
       // Fetch all requests for history (only approved and rejected)
       const allRes = await stockAdjustmentApi.getAll({ limit: 100 });
@@ -65,15 +71,30 @@ export default function ManagerStockAdjustments() {
       const historyData = allData.filter(req => req.status === 'APPROVED' || req.status === 'REJECTED');
       setHistoryRequests(historyData);
       
-      // Fetch stats
-      const statsRes = await stockAdjustmentApi.getStats();
-      setStats(statsRes);
+      // Calculate stats from actual data
+      const totalPending = pendingData.length;
+      const totalApproved = allData.filter(req => req.status === 'APPROVED').length;
+      const totalRejected = allData.filter(req => req.status === 'REJECTED').length;
+      const totalRequests = allData.length;
+      
+      setStats({
+        pending: totalPending,
+        approved: totalApproved,
+        rejected: totalRejected,
+        totalRequests: totalRequests
+      });
+      
     } catch (error) {
       console.error('Error fetching adjustments:', error);
       toast.error(error.response?.data?.message || 'Failed to load adjustment requests');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRefresh = () => {
+    fetchData();
+    toast.success("Data refreshed");
   };
 
   const handleApprove = async () => {
@@ -187,7 +208,6 @@ export default function ManagerStockAdjustments() {
   // Get requested change display with stock preview
   const getRequestedChangeDisplay = (requestedQuantity, currentStock, unit, newStock) => {
     const isIncrease = requestedQuantity > 0;
-    const absQuantity = Math.abs(requestedQuantity);
     
     return (
       <div>
@@ -228,10 +248,21 @@ export default function ManagerStockAdjustments() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Stock Adjustments</h1>
-        <p className="text-gray-600 mt-1">Inventory {'>'} Stock Adjustments</p>
+      {/* Header with Refresh Button */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Stock Adjustments</h1>
+          <p className="text-gray-600 mt-1">Inventory {'>'} Stock Adjustments</p>
+        </div>
+        <Button 
+          variant="outline" 
+          onClick={handleRefresh} 
+          className="gap-2"
+          disabled={loading}
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
       </div>
 
       {/* Stats Cards */}
@@ -239,28 +270,28 @@ export default function ManagerStockAdjustments() {
         <Card className="bg-yellow-50 border-yellow-200">
           <CardContent className="p-4 text-center">
             <Clock className="h-6 w-6 text-yellow-600 mx-auto mb-2" />
-            <p className="text-2xl font-bold text-yellow-700">{stats.pending || 0}</p>
+            <p className="text-2xl font-bold text-yellow-700">{stats.pending}</p>
             <p className="text-xs text-yellow-600">Pending Requests</p>
           </CardContent>
         </Card>
         <Card className="bg-green-50 border-green-200">
           <CardContent className="p-4 text-center">
             <CheckCircle className="h-6 w-6 text-green-600 mx-auto mb-2" />
-            <p className="text-2xl font-bold text-green-700">{stats.approved || 0}</p>
+            <p className="text-2xl font-bold text-green-700">{stats.approved}</p>
             <p className="text-xs text-green-600">Approved</p>
           </CardContent>
         </Card>
         <Card className="bg-red-50 border-red-200">
           <CardContent className="p-4 text-center">
             <XCircle className="h-6 w-6 text-red-600 mx-auto mb-2" />
-            <p className="text-2xl font-bold text-red-700">{stats.rejected || 0}</p>
+            <p className="text-2xl font-bold text-red-700">{stats.rejected}</p>
             <p className="text-xs text-red-600">Rejected</p>
           </CardContent>
         </Card>
         <Card className="bg-blue-50 border-blue-200">
           <CardContent className="p-4 text-center">
             <Package className="h-6 w-6 text-blue-600 mx-auto mb-2" />
-            <p className="text-2xl font-bold text-blue-700">{stats.totalRequests || 0}</p>
+            <p className="text-2xl font-bold text-blue-700">{stats.totalRequests}</p>
             <p className="text-xs text-blue-600">Total Requests</p>
           </CardContent>
         </Card>
@@ -310,6 +341,11 @@ export default function ManagerStockAdjustments() {
           >
             <Filter className="h-4 w-4" />
             Approved / Rejected History
+            {(stats.approved > 0 || stats.rejected > 0) && (
+              <span className="ml-1 px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">
+                {stats.approved + stats.rejected}
+              </span>
+            )}
           </button>
         </nav>
       </div>

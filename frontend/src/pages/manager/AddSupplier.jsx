@@ -1,26 +1,33 @@
 // src/pages/manager/AddSupplier.jsx
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { suppliersApi } from "@/api/index.js";
+import { suppliersApi, rawMaterialsApi } from "@/api/index.js";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.jsx";
 import { Button } from "@/components/ui/button.jsx";
 import { Input } from "@/components/ui/input.jsx";
 import { Label } from "@/components/ui/label.jsx";
 import { Textarea } from "@/components/ui/textarea.jsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.jsx";
-import { Badge } from "@/components/ui/badge.jsx";
 import { PageHeader } from "@/components/shared/PageHeader.jsx";
-import { ArrowLeft, Save, FileText, Building2, Phone, Mail, MapPin, CreditCard, Banknote, Package, X, Star, Truck, ClipboardList } from "lucide-react";
+import { 
+  ArrowLeft, 
+  Save, 
+  FileText, 
+  Building2, 
+  Phone, 
+  Mail, 
+  MapPin, 
+  CreditCard, 
+  Banknote, 
+  Package, 
+  X, 
+  Star, 
+  Loader2,
+  CheckCircle,
+  AlertCircle,
+} from "lucide-react";
 import { toast } from "sonner";
-
-// Raw material categories (must match database)
-const RAW_MATERIAL_CATEGORIES = [
-  { value: "Plastic Materials", label: "Plastic Materials", description: "Empty bottles, jars, caps, plastic components" },
-  { value: "Packaging Materials", label: "Packaging Materials", description: "Labels, shrink wrap, cartons, crates" },
-  { value: "Filtration Equipment", label: "Filtration Equipment", description: "RO membranes, filter cartridges, UV lamps" },
-  { value: "Chemicals", label: "Chemicals", description: "Cleaning chemicals, sanitizers, activated carbon" },
-  { value: "Miscellaneous", label: "Miscellaneous", description: "Office supplies, construction materials, repair items" },
-];
+import { useNavigation } from "@/hooks/useNavigation.js";
 
 const PAYMENT_TERMS = ["Net 15", "Net 30", "Net 45", "Net 60", "COD", "Cash", "Credit 30 Days", "Credit 45 Days"];
 const STATUS_OPTIONS = ["Active", "Inactive", "Blacklisted"];
@@ -28,9 +35,12 @@ const STATUS_OPTIONS = ["Active", "Inactive", "Blacklisted"];
 export default function AddSupplier() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { isAdmin, navigateTo } = useNavigation();
   const isEditing = !!id;
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [loadingCategories, setLoadingCategories] = useState(true);
   
   const [formData, setFormData] = useState({
     name: "",
@@ -49,11 +59,37 @@ export default function AddSupplier() {
     notes: "",
   });
 
+  // ✅ Fetch categories from database
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
   useEffect(() => {
     if (isEditing) {
       fetchSupplier();
     }
   }, [id]);
+
+  const fetchCategories = async () => {
+    setLoadingCategories(true);
+    try {
+      const response = await rawMaterialsApi.getCategories();
+      setCategories(response.data.data || []);
+    } catch (error) {
+      console.error("Failed to fetch categories:", error);
+      toast.error("Failed to load categories");
+      // Fallback categories if API fails
+      setCategories([
+        { id: "1", name: "Plastic Materials", description: "Empty bottles, jars, caps, plastic components", _count: { rawMaterials: 0 } },
+        { id: "2", name: "Packaging Materials", description: "Labels, shrink wrap, cartons, crates", _count: { rawMaterials: 0 } },
+        { id: "3", name: "Filtration Equipment", description: "RO membranes, filter cartridges, UV lamps", _count: { rawMaterials: 0 } },
+        { id: "4", name: "Chemicals", description: "Cleaning chemicals, sanitizers, activated carbon", _count: { rawMaterials: 0 } },
+        { id: "5", name: "Miscellaneous", description: "Office supplies, construction materials, repair items", _count: { rawMaterials: 0 } },
+      ]);
+    } finally {
+      setLoadingCategories(false);
+    }
+  };
 
   const fetchSupplier = async () => {
     setLoading(true);
@@ -78,7 +114,7 @@ export default function AddSupplier() {
       });
     } catch (error) {
       toast.error("Failed to load supplier");
-      navigate("/manager/suppliers");
+      handleNavigate("/suppliers");
     } finally {
       setLoading(false);
     }
@@ -88,13 +124,21 @@ export default function AddSupplier() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const toggleCategory = (category) => {
+  const toggleCategory = (categoryName) => {
     setFormData(prev => ({
       ...prev,
-      productCategories: prev.productCategories.includes(category)
-        ? prev.productCategories.filter(c => c !== category)
-        : [...prev.productCategories, category]
+      productCategories: prev.productCategories.includes(categoryName)
+        ? prev.productCategories.filter(c => c !== categoryName)
+        : [...prev.productCategories, categoryName]
     }));
+  };
+
+  const handleNavigate = (path) => {
+    if (isAdmin()) {
+      navigate(`/admin${path}`);
+    } else {
+      navigate(`/manager${path}`);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -119,7 +163,7 @@ export default function AddSupplier() {
         await suppliersApi.create(formData);
         toast.success("Supplier created successfully");
       }
-      navigate("/manager/suppliers");
+      handleNavigate("/suppliers");
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to save supplier");
     } finally {
@@ -142,7 +186,7 @@ export default function AddSupplier() {
         await suppliersApi.create({ ...formData, status: "Draft" });
         toast.success("Supplier draft saved");
       }
-      navigate("/manager/suppliers");
+      handleNavigate("/suppliers");
     } catch (error) {
       toast.error("Failed to save draft");
     } finally {
@@ -176,14 +220,25 @@ export default function AddSupplier() {
     );
   };
 
+  // Get category item count
+  const getCategoryItemCount = (categoryId) => {
+    const cat = categories.find(c => c.id === categoryId);
+    return cat?._count?.rawMaterials || 0;
+  };
+
   if (loading) {
-    return <div className="flex justify-center py-12">Loading supplier details...</div>;
+    return (
+      <div className="flex justify-center items-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+        <span className="ml-2 text-gray-500">Loading supplier details...</span>
+      </div>
+    );
   }
 
   return (
     <div className="space-y-5 max-w-4xl mx-auto">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/manager/suppliers")}>
+        <Button variant="ghost" size="icon" onClick={() => handleNavigate("/suppliers")}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <PageHeader 
@@ -257,7 +312,7 @@ export default function AddSupplier() {
             </CardContent>
           </Card>
 
-          {/* Raw Material Categories - Important for Supplier Categorization */}
+          {/* Raw Material Categories - Fetched from Database */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
@@ -267,34 +322,76 @@ export default function AddSupplier() {
               <p className="text-xs text-gray-500 mt-1">Select the raw material categories this supplier provides</p>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {RAW_MATERIAL_CATEGORIES.map((category) => (
-                  <div
-                    key={category.value}
-                    onClick={() => toggleCategory(category.value)}
-                    className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${
-                      formData.productCategories.includes(category.value)
-                        ? "border-blue-500 bg-blue-50"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="font-medium text-sm">{category.label}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">{category.description}</p>
-                      </div>
-                      {formData.productCategories.includes(category.value) && (
-                        <X className="h-4 w-4 text-blue-500" onClick={(e) => {
-                          e.stopPropagation();
-                          toggleCategory(category.value);
-                        }} />
-                      )}
-                    </div>
+              {loadingCategories ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                  <span className="ml-2 text-gray-500">Loading categories...</span>
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {categories.map((category) => {
+                      const isSelected = formData.productCategories.includes(category.name);
+                      const itemCount = category._count?.rawMaterials || 0;
+                      
+                      return (
+                        <div
+                          key={category.id}
+                          onClick={() => toggleCategory(category.name)}
+                          className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${
+                            isSelected
+                              ? "border-blue-500 bg-blue-50 shadow-sm"
+                              : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <p className={`font-medium text-sm ${isSelected ? "text-blue-700" : "text-gray-700"}`}>
+                                  {category.name}
+                                </p>
+                                {isSelected && (
+                                  <CheckCircle className="h-4 w-4 text-blue-500" />
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-500 mt-0.5">{category.description}</p>
+                              {itemCount > 0 && (
+                                <div className="flex items-center gap-1 mt-1">
+                                  <Package className="h-3 w-3 text-gray-400" />
+                                  <span className="text-xs text-gray-400">
+                                    {itemCount} item{itemCount > 1 ? 's' : ''} available
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                            {isSelected && (
+                              <X 
+                                className="h-4 w-4 text-blue-500 hover:text-red-500 transition-colors" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleCategory(category.name);
+                                }} 
+                              />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
-              {formData.productCategories.length === 0 && (
-                <p className="text-xs text-red-500 mt-2">Please select at least one category</p>
+                  {formData.productCategories.length === 0 && (
+                    <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start gap-2">
+                      <AlertCircle className="h-4 w-4 text-yellow-600 mt-0.5" />
+                      <p className="text-xs text-yellow-700">Please select at least one category</p>
+                    </div>
+                  )}
+                  {categories.length === 0 && (
+                    <div className="text-center py-8 text-gray-500">
+                      <AlertCircle className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+                      <p className="text-sm">No categories available</p>
+                      <p className="text-xs text-gray-400 mt-1">Please add categories in the Product Catalog</p>
+                    </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -353,7 +450,15 @@ export default function AddSupplier() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {renderStarRating()}
+              <div className="flex items-center gap-4">
+                {renderStarRating()}
+                <span className="text-sm text-gray-400">|</span>
+                <span className="text-sm text-gray-500">
+                  {formData.performanceRating >= 4.5 ? "Excellent" :
+                   formData.performanceRating >= 4.0 ? "Good" :
+                   formData.performanceRating >= 3.0 ? "Average" : "Needs Improvement"}
+                </span>
+              </div>
             </CardContent>
           </Card>
 
@@ -427,7 +532,7 @@ export default function AddSupplier() {
 
           {/* Action Buttons */}
           <div className="flex gap-3 justify-end">
-            <Button type="button" variant="outline" onClick={() => navigate("/manager/suppliers")}>
+            <Button type="button" variant="outline" onClick={() => handleNavigate("/suppliers")}>
               Cancel
             </Button>
             <Button type="button" variant="secondary" onClick={handleSaveDraft} disabled={saving}>

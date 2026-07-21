@@ -1,4 +1,5 @@
 // prisma/schema.prisma
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,7 +9,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─── Enums ────────────────────────────────────────────────────────────────────
+// ==================== ENUMS ====================
 
 enum Role {
   ADMIN
@@ -42,6 +43,7 @@ enum PaymentStatus {
   COMPLETED
   FAILED
   REFUNDED
+  CANCELLED
 }
 
 enum PaymentMethod {
@@ -51,11 +53,11 @@ enum PaymentMethod {
   PAY_LATER
 }
 
-enum PaymentStatusOrder {
-  PENDING
-  PAID
-  RECEIVED_UNPAID
-  CANCELLED
+enum PaymentPlatform {
+  KHALTI
+  ESEWA
+  FONEPAY
+  OTHER
 }
 
 enum CustomerType {
@@ -96,6 +98,7 @@ enum AdjustmentType {
 
 enum NotificationType {
   LOW_STOCK
+  OUT_OF_STOCK
   CREDIT_DUE
   ORDER_UPDATE
   SUPPLIER_DELAY
@@ -105,6 +108,11 @@ enum NotificationType {
   STOCK_ADJUSTMENT
   DELIVERY_UPDATE
   NEW_ORDER
+  USER_CREATED
+  USER_STATUS_CHANGE
+  USER_ROLE_CHANGE
+  PASSWORD_CHANGE
+  PROFILE_CHANGE_REQUEST
 }
 
 enum NotificationPriority {
@@ -144,42 +152,80 @@ enum PurchaseOrderStatus {
   CANCELLED
 }
 
-// ─── Models ───────────────────────────────────────────────────────────────────
-
-model User {
-  id                String             @id @default(uuid())
-  name              String
-  email             String             @unique
-  password          String
-  role              Role               @default(STAFF)
-  isActive          Boolean            @default(true)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  
-  // Relations
-  stockTransactions StockTransaction[]
-  purchaseOrders    PurchaseOrder[]    @relation("PurchaseOrderCreator")
-  approvedOrders    PurchaseOrder[]    @relation("PurchaseOrderApprover")
-  cancelledOrders   PurchaseOrder[]    @relation("PurchaseOrderCanceller")
-  salesOrders       SalesOrder[]
-  auditLogs         AuditLog[]
-  creditPayments    CreditPayment[]
-  requestedAdjustments StockAdjustment[] @relation("RequestedAdjustments")
-  approvedAdjustments  StockAdjustment[] @relation("ApprovedAdjustments")
-  staffPerformance     StaffPerformance?
-  notifications        Notification[]
-  notificationPref     NotificationPreference?
-  savedReports         SavedReport[]
-  
-  // Supplier & Purchase Order relations
-  purchaseOrderPayments   PurchaseOrderPayment[]
-  goodsReceivingNotes     GoodsReceivingNote[]
-  
-  // Add this line for invoice uploads
-  purchaseOrderInvoices   PurchaseOrderInvoice[]  // ✅ ADD THIS LINE
+enum ProfileChangeStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
-// ==================== PRODUCT CATEGORY (For Finished Goods - What you SELL) ====================
+enum ProfileChangeField {
+  NAME
+  EMAIL
+  PHONE
+  PROFILE_IMAGE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+// ==================== USER MODEL ====================
+
+model User {
+  id                      String                    @id @default(uuid())
+  name                    String
+  email                   String                    @unique
+  password                String
+  role                    Role                      @default(STAFF)
+  isActive                Boolean                   @default(true)
+  phone                   String?
+  profileImage            String?
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+
+  // Relations
+  stockTransactions       StockTransaction[]
+  purchaseOrders          PurchaseOrder[]           @relation("PurchaseOrderCreator")
+  approvedOrders          PurchaseOrder[]           @relation("PurchaseOrderApprover")
+  cancelledOrders         PurchaseOrder[]           @relation("PurchaseOrderCanceller")
+  salesOrders             SalesOrder[]
+  auditLogs               AuditLog[]
+  creditPayments          CreditPayment[]
+  requestedAdjustments    StockAdjustment[]         @relation("RequestedAdjustments")
+  approvedAdjustments     StockAdjustment[]         @relation("ApprovedAdjustments")
+  staffPerformance        StaffPerformance[]
+  notifications           Notification[]
+  notificationPref        NotificationPreference?
+  savedReports            SavedReport[]
+  purchaseOrderPayments   PurchaseOrderPayment[]
+  goodsReceivingNotes     GoodsReceivingNote[]
+  purchaseOrderInvoices   PurchaseOrderInvoice[]
+  productionBatchesCreated ProductionBatch[]        @relation("ProductionCreator")
+  profileChangeRequests   ProfileChangeRequest[]    @relation("ProfileChangeRequester")
+  reviewedProfileRequests ProfileChangeRequest[]    @relation("ProfileReviewer")
+  salesInvoices           SalesInvoice[]            @relation("SalesInvoiceCreator")
+  purchaseInvoices        PurchaseInvoice[]         @relation("PurchaseInvoiceCreator")
+}
+
+// ==================== ORDER COUNTER TABLE ====================
+
+model OrderCounter {
+  id          String   @id @default(uuid())
+  prefix      String   // "SO", "PO", "SINV", "PINV", "CP" (Credit Payment)
+  date        String   // "20260715"
+  lastNumber  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([prefix, date])
+  @@index([prefix, date])
+}
+
+// ==================== PRODUCT CATEGORY ====================
 
 model ProductCategory {
   id          String    @id @default(uuid())
@@ -190,15 +236,17 @@ model ProductCategory {
   products    Product[]
 }
 
-// ==================== RAW MATERIAL CATEGORY (For Raw Materials - What you BUY) ====================
+// ==================== RAW MATERIAL CATEGORY ====================
 
 model RawMaterialCategory {
-  id          String        @id @default(uuid())
-  name        String        @unique
-  description String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  rawMaterials RawMaterial[]
+  id            String        @id @default(uuid())
+  name          String        @unique
+  description   String?
+  icon          String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  rawMaterials  RawMaterial[]
+  suppliers     Supplier[]    @relation("SupplierCategories")
 }
 
 // ==================== SUPPLIER MODEL ====================
@@ -210,8 +258,8 @@ model Supplier {
   email              String?
   phone              String
   address            String?
-  productCategories  String[]        
-  paymentTerms       String?         
+  productCategories  String[]
+  paymentTerms       String?
   status             String          @default("Active")
   performanceRating  Float           @default(4.0)
   bankName           String?
@@ -221,45 +269,46 @@ model Supplier {
   notes              String?
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
-  
-  // Relations
-  rawMaterials       RawMaterial[]      
+  rawMaterials       RawMaterial[]
   purchaseOrders     PurchaseOrder[]
   products           Product[]
+  categories         RawMaterialCategory[] @relation("SupplierCategories")
+  purchaseInvoices   PurchaseInvoice[]
 }
 
 // ==================== RAW MATERIAL MODEL ====================
 
 model RawMaterial {
-  id              String              @id @default(uuid())
-  name            String
-  sku             String?             @unique
-  description     String?
-  unit            String              @default("piece")
-  categoryId      String
-  category        RawMaterialCategory @relation(fields: [categoryId], references: [id])
-  currentStock    Int                 @default(0)
-  reorderLevel    Int                 @default(10)
-  unitCost        Float?
-  supplierId      String?
-  supplier        Supplier?           @relation(fields: [supplierId], references: [id])
-  imageUrl        String?
-  imagePublicId   String?
-  status          String              @default("Active")
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  
-  // Relations
-  purchaseOrderItems PurchaseOrderRawMaterial[]
-  stockTransactions  StockTransaction[]
+  id                  String                    @id @default(uuid())
+  name                String
+  sku                 String?                   @unique
+  description         String?
+  unit                String                    @default("piece")
+  categoryId          String
+  category            RawMaterialCategory       @relation(fields: [categoryId], references: [id])
+  currentStock        Int                       @default(0)
+  reorderLevel        Int                       @default(10)
+  unitCost            Float?
+  supplierId          String?
+  supplier            Supplier?                 @relation(fields: [supplierId], references: [id])
+  imageUrl            String?
+  imagePublicId       String?
+  status              String                    @default("Active")
+  isArchived          Boolean                   @default(false)
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  purchaseOrderItems  PurchaseOrderRawMaterial[]
+  stockTransactions   StockTransaction[]
   goodsReceivingItems GoodsReceivingRawMaterial[]
-  
+  purchaseInvoiceItems PurchaseInvoiceItem[]
+
   @@index([supplierId])
   @@index([categoryId])
   @@index([status])
+  @@index([isArchived])
 }
 
-// ==================== PRODUCT MODEL (Finished Goods) ====================
+// ==================== PRODUCT MODEL ====================
 
 model Product {
   id                 String              @id @default(uuid())
@@ -274,19 +323,118 @@ model Product {
   currentStock       Int                 @default(0)
   costPrice          Float?
   sellingPrice       Float?
+  productionCost     Float?
   categoryId         String
   category           ProductCategory     @relation(fields: [categoryId], references: [id])
   supplierId         String?
   supplier           Supplier?           @relation(fields: [supplierId], references: [id])
+  isArchived         Boolean             @default(false)
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
-  
-  // Relations
   stockTransactions  StockTransaction[]
   purchaseOrderItems PurchaseOrderItem[]
   salesOrderItems    SalesOrderItem[]
   stockAdjustments   StockAdjustment[]
   inventoryMovements InventoryMovement[]
+  productionBatches  ProductionBatch[]
+  creditPaymentDetails CreditPaymentDetail[]
+  salesInvoiceItems  SalesInvoiceItem[]
+}
+
+// ==================== SALES INVOICE ====================
+
+model SalesInvoice {
+  id              String         @id @default(uuid())
+  invoiceNumber   String         @unique
+  salesOrderId    String         @unique
+  salesOrder      SalesOrder     @relation(fields: [salesOrderId], references: [id])
+  customerId      String
+  customer        Customer       @relation(fields: [customerId], references: [id])
+  invoiceDate     DateTime       @default(now())
+  dueDate         DateTime?
+  subtotal        Float          @default(0)
+  discount        Float          @default(0)
+  tax             Float          @default(0)
+  totalAmount     Float          @default(0)
+  status          InvoiceStatus  @default(DRAFT)
+  notes           String?
+  pdfUrl          String?
+  createdById     String
+  createdBy       User           @relation("SalesInvoiceCreator", fields: [createdById], references: [id])
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  items           SalesInvoiceItem[]
+
+  @@index([salesOrderId])
+  @@index([customerId])
+  @@index([invoiceNumber])
+  @@index([status])
+}
+
+// ==================== SALES INVOICE ITEMS ====================
+
+model SalesInvoiceItem {
+  id              String      @id @default(uuid())
+  invoiceId       String
+  invoice         SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productId       String?
+  product         Product?    @relation(fields: [productId], references: [id])
+  description     String
+  quantity        Int
+  unitPrice       Float
+  totalPrice      Float
+  createdAt       DateTime    @default(now())
+
+  @@index([invoiceId])
+  @@index([productId])
+}
+
+// ==================== PURCHASE INVOICE ====================
+
+model PurchaseInvoice {
+  id              String         @id @default(uuid())
+  invoiceNumber   String         @unique
+  purchaseOrderId String         @unique
+  purchaseOrder   PurchaseOrder  @relation(fields: [purchaseOrderId], references: [id])
+  supplierId      String
+  supplier        Supplier       @relation(fields: [supplierId], references: [id])
+  invoiceDate     DateTime       @default(now())
+  dueDate         DateTime?
+  subtotal        Float          @default(0)
+  discount        Float          @default(0)
+  tax             Float          @default(0)
+  totalAmount     Float          @default(0)
+  status          InvoiceStatus  @default(DRAFT)
+  notes           String?
+  pdfUrl          String?
+  createdById     String
+  createdBy       User           @relation("PurchaseInvoiceCreator", fields: [createdById], references: [id])
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  items           PurchaseInvoiceItem[]
+
+  @@index([purchaseOrderId])
+  @@index([supplierId])
+  @@index([invoiceNumber])
+  @@index([status])
+}
+
+// ==================== PURCHASE INVOICE ITEMS ====================
+
+model PurchaseInvoiceItem {
+  id              String      @id @default(uuid())
+  invoiceId       String
+  invoice         PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  rawMaterialId   String?
+  rawMaterial     RawMaterial? @relation(fields: [rawMaterialId], references: [id])
+  description     String
+  quantity        Int
+  unitPrice       Float
+  totalPrice      Float
+  createdAt       DateTime    @default(now())
+
+  @@index([invoiceId])
+  @@index([rawMaterialId])
 }
 
 // ==================== PURCHASE ORDER MODELS ====================
@@ -313,72 +461,67 @@ model PurchaseOrder {
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
   orderDate            DateTime             @default(now())
-  
-  // Approval fields with unique relation names
   approvedById         String?
   approvedBy           User?                @relation("PurchaseOrderApprover", fields: [approvedById], references: [id])
   approvedAt           DateTime?
-  
   cancelledById        String?
   cancelledBy          User?                @relation("PurchaseOrderCanceller", fields: [cancelledById], references: [id])
   cancelledAt          DateTime?
-  
-  // Relations
   items                PurchaseOrderRawMaterial[]
   goodsReceivingNotes  GoodsReceivingNote[]
   payments             PurchaseOrderPayment[]
   purchaseOrderItems   PurchaseOrderItem[]
-   invoices PurchaseOrderInvoice[]
+  invoices             PurchaseOrderInvoice[]
+  purchaseInvoice      PurchaseInvoice?     // ✅ Relation to purchase invoice (NO @relation with fields)
 }
 
 model PurchaseOrderInvoice {
-  id              String   @id @default(uuid())
+  id              String          @id @default(uuid())
   purchaseOrderId String
-  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  purchaseOrder   PurchaseOrder   @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   imageUrl        String
   imagePublicId   String?
   fileName        String?
   fileSize        Int?
   uploadedById    String
-  uploadedBy      User     @relation(fields: [uploadedById], references: [id])
+  uploadedBy      User            @relation(fields: [uploadedById], references: [id])
   notes           String?
-  createdAt       DateTime @default(now())
-  
+  createdAt       DateTime        @default(now())
+
   @@index([purchaseOrderId])
   @@index([createdAt])
 }
 
-
 model PurchaseOrderRawMaterial {
-  id              String         @id @default(uuid())
+  id              String        @id @default(uuid())
   purchaseOrderId String
-  purchaseOrder   PurchaseOrder  @relation(fields: [purchaseOrderId], references: [id])
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
   rawMaterialId   String
-  rawMaterial     RawMaterial    @relation(fields: [rawMaterialId], references: [id])
+  rawMaterial     RawMaterial   @relation(fields: [rawMaterialId], references: [id])
   quantity        Int
-  receivedQty     Int            @default(0)
-  damagedQty      Int            @default(0)
+  receivedQty     Int           @default(0)
+  damagedQty      Int           @default(0)
   unitPrice       Float?
   totalPrice      Float?
   remarks         String?
-  
+
   @@index([purchaseOrderId])
   @@index([rawMaterialId])
 }
 
 model PurchaseOrderPayment {
-  id              String   @id @default(uuid())
+  id              String        @id @default(uuid())
   purchaseOrderId String
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   amount          Float
   paymentMethod   String
-  transactionId   String?  @unique
-  paymentDate     DateTime @default(now())
+  transactionId   String?       @unique
+  paymentDate     DateTime      @default(now())
   recordedById    String
-  recordedBy      User     @relation(fields: [recordedById], references: [id])
+  recordedBy      User          @relation(fields: [recordedById], references: [id])
   notes           String?
-  createdAt       DateTime @default(now())
-  
+  createdAt       DateTime      @default(now())
+
   @@index([purchaseOrderId])
   @@index([paymentDate])
 }
@@ -407,24 +550,24 @@ model GoodsReceivingNote {
   notes           String?
   items           GoodsReceivingRawMaterial[]
   createdAt       DateTime                  @default(now())
-  
+
   @@index([purchaseOrderId])
   @@index([grnNumber])
 }
 
 model GoodsReceivingRawMaterial {
-  id                  String         @id @default(uuid())
-  grnId               String
-  grn                 GoodsReceivingNote @relation(fields: [grnId], references: [id], onDelete: Cascade)
-  rawMaterialId       String
-  rawMaterial         RawMaterial    @relation(fields: [rawMaterialId], references: [id])
-  orderedQty          Int
-  previouslyReceived  Int            @default(0)
-  receivedQty         Int
-  damagedQty          Int            @default(0)
-  acceptedQty         Int
-  remarks             String?
-  
+  id                String        @id @default(uuid())
+  grnId             String
+  grn               GoodsReceivingNote @relation(fields: [grnId], references: [id], onDelete: Cascade)
+  rawMaterialId     String
+  rawMaterial       RawMaterial   @relation(fields: [rawMaterialId], references: [id])
+  orderedQty        Int
+  previouslyReceived Int         @default(0)
+  receivedQty       Int
+  damagedQty        Int          @default(0)
+  acceptedQty       Int
+  remarks           String?
+
   @@index([grnId])
   @@index([rawMaterialId])
 }
@@ -464,6 +607,7 @@ model Customer {
   customerType       CustomerType    @default(REGULAR)
   creditLimit        Float?          @default(0)
   creditAccount      CreditAccount?
+  salesInvoices      SalesInvoice[]
 }
 
 model SalesOrder {
@@ -481,6 +625,8 @@ model SalesOrder {
   items       SalesOrderItem[]
   delivery    Delivery?
   payment     Payment?
+  salesInvoice SalesInvoice?   // ✅ NO @relation with fields here
+  creditPayments CreditPaymentDetail[]
 }
 
 model SalesOrderItem {
@@ -506,88 +652,140 @@ model Delivery {
   updatedAt    DateTime       @updatedAt
 }
 
+// ==================== PAYMENT MODEL ====================
+
 model Payment {
-  id              String        @id @default(uuid())
-  salesOrderId    String        @unique
-  salesOrder      SalesOrder    @relation(fields: [salesOrderId], references: [id])
-  method          PaymentMethod @default(CASH)  
-  status          PaymentStatus @default(PENDING)
-  amount          Float
-  khaltiPidx      String?       @unique
-  khaltiTransactionId String?
-  verifiedAt      DateTime?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id                    String          @id @default(uuid())
+  salesOrderId          String          @unique
+  salesOrder            SalesOrder      @relation(fields: [salesOrderId], references: [id])
+  method                PaymentMethod   @default(CASH)
+  platform              PaymentPlatform?
+  platformTransactionId String?
+  status                PaymentStatus   @default(PENDING)
+  amount                Float
+  khaltiPidx            String?         @unique
+  khaltiTransactionId   String?
+  verifiedAt            DateTime?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@index([salesOrderId])
+  @@index([status])
+  @@index([platform])
 }
 
-// ==================== CREDIT MODELS ====================
+// ==================== CREDIT MODELS (UPDATED WITH AUTO-INCREMENT) ====================
 
 model CreditAccount {
-  id                String       @id @default(uuid())
-  customerId        String       @unique
-  customer          Customer     @relation(fields: [customerId], references: [id])
-  totalCredit       Float        @default(0)
-  paidAmount        Float        @default(0)
-  remainingBalance  Float        @default(0)
-  dueDate           DateTime
-  status            CreditStatus @default(PENDING)
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  id                String        @id @default(uuid())
+  customerId        String        @unique
+  customer          Customer      @relation(fields: [customerId], references: [id])
+  
+  // Financial tracking
+  totalCredit       Float         @default(0)      // Total credit amount (principal)
+  paidAmount        Float         @default(0)      // Total paid so far
+  remainingBalance  Float         @default(0)      // Total credit - paidAmount
+  
+  // Payment terms
+  dueDate           DateTime                        // When payment is due
+  status            CreditStatus  @default(PENDING) // PAID, PARTIAL, OVERDUE, PENDING
+  
+  // Metadata
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  // Relations
   payments          CreditPayment[]
 }
 
 model CreditPayment {
-  id               String        @id @default(uuid())
-  creditAccountId  String
-  creditAccount    CreditAccount @relation(fields: [creditAccountId], references: [id], onDelete: Cascade)
-  amount           Float
-  paymentMethod    String
-  paymentDate      DateTime      @default(now())
-  transactionId    String?       @unique
-  notes            String?
-  status           String        @default("COMPLETED")
-  recordedById     String
-  recordedBy       User          @relation(fields: [recordedById], references: [id])
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  id                    String            @id @default(uuid())
+  creditAccountId       String
+  creditAccount         CreditAccount     @relation(fields: [creditAccountId], references: [id], onDelete: Cascade)
+  
+  // Payment details
+  amount                Float             // Amount paid in this installment
+  paymentMethod         String            // CASH, ONLINE, BANK_TRANSFER
+  paymentPlatform       String?           // KHALTI, ESEWA, etc. (if ONLINE)
+  platformTransactionId String?           // Transaction ID from platform
+  paymentDate           DateTime          @default(now())
+  
+  // ✅ Auto-increment fields
+  transactionId         String?           @unique // Internal transaction ID (legacy)
+  creditPaymentNumber   String?           @unique // ✅ Auto-incremented payment number (CP-YYYYMMDD-XXXX)
+  
+  // Additional info
+  notes                 String?           // e.g., "1st installment", "Full payment"
+  status                String            @default("COMPLETED")
+  
+  // Audit
+  recordedById          String
+  recordedBy            User              @relation(fields: [recordedById], references: [id])
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  
+  // Relations
+  paymentDetails        CreditPaymentDetail[]
 
   @@index([creditAccountId])
   @@index([paymentDate])
   @@index([status])
+  @@index([recordedById])
+  @@index([transactionId])
+  @@index([creditPaymentNumber]) // ✅ Index for faster lookup
+}
+
+model CreditPaymentDetail {
+  id                String          @id @default(uuid())
+  paymentId         String
+  payment           CreditPayment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  
+  // Order and product details
+  salesOrderId      String
+  salesOrder        SalesOrder      @relation(fields: [salesOrderId], references: [id])
+  productId         String
+  product           Product         @relation(fields: [productId], references: [id])
+  
+  // Quantity and pricing
+  quantity          Int
+  unitPrice         Float
+  totalPrice        Float           // Allocated amount for this product
+  
+  // Metadata
+  createdAt         DateTime        @default(now())
+
+  @@index([paymentId])
+  @@index([salesOrderId])
+  @@index([productId])
 }
 
 // ==================== STOCK ADJUSTMENT ====================
 
-// Update StockAdjustment model in schema.prisma
 model StockAdjustment {
   id                String                @id @default(uuid())
   requestNumber     String                @unique
   productId         String
   product           Product               @relation(fields: [productId], references: [id])
-  itemType          String                @default("PRODUCT") // "RAW_MATERIAL" or "PRODUCT"
+  itemType          String                @default("PRODUCT")
   adjustmentType    AdjustmentType        @default(CORRECTION)
   currentStock      Int
   requestedQuantity Int
   newStock          Int
-  reason            String                // Now stores the predefined reason string
+  reason            String
   status            StockAdjustmentStatus @default(PENDING)
-  notes             String?               // Can be removed or kept optional
+  notes             String?
   imageUrl          String?
   imagePublicId     String?
-  
   requestedById     String
   requestedBy       User                  @relation("RequestedAdjustments", fields: [requestedById], references: [id])
-  
   approvedById      String?
   approvedBy        User?                 @relation("ApprovedAdjustments", fields: [approvedById], references: [id])
-  
   rejectionReason   String?
-  
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
   approvedAt        DateTime?
   completedAt       DateTime?
-  
+
   @@index([productId])
   @@index([status])
   @@index([requestedById])
@@ -599,7 +797,7 @@ model StockAdjustment {
 
 model StaffPerformance {
   id                String    @id @default(uuid())
-  userId            String    @unique
+  userId            String
   user              User      @relation(fields: [userId], references: [id])
   month             DateTime  @default(now())
   ordersProcessed   Int       @default(0)
@@ -612,6 +810,29 @@ model StaffPerformance {
 
   @@unique([userId, month])
   @@index([month])
+}
+
+// ==================== PROFILE CHANGE REQUEST ====================
+
+model ProfileChangeRequest {
+  id              String                @id @default(uuid())
+  userId          String
+  user            User                  @relation("ProfileChangeRequester", fields: [userId], references: [id])
+  field           ProfileChangeField
+  currentValue    String?
+  requestedValue  String
+  status          ProfileChangeStatus   @default(PENDING)
+  reason          String?
+  adminNotes      String?
+  reviewedById    String?
+  reviewedBy      User?                 @relation("ProfileReviewer", fields: [reviewedById], references: [id])
+  reviewedAt      DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 // ==================== NOTIFICATIONS ====================
@@ -631,9 +852,8 @@ model Notification {
   emailSentAt   DateTime?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
-  
   emailLogs     EmailLog[]
-  
+
   @@index([userId])
   @@index([isRead])
   @@index([type])
@@ -646,24 +866,22 @@ model NotificationPreference {
   id                    String   @id @default(uuid())
   userId                String   @unique
   user                  User     @relation(fields: [userId], references: [id])
-  
   emailNotifications    Boolean  @default(true)
   smsNotifications      Boolean  @default(false)
   inAppNotifications    Boolean  @default(true)
-  
+  pushNotifications     Boolean  @default(true)
   lowStockAlerts        Boolean  @default(true)
+  outOfStockAlerts      Boolean  @default(true)
   creditDueAlerts       Boolean  @default(true)
-  supplierDelayAlerts   Boolean  @default(true)
-  orderUpdates          Boolean  @default(true)
+  supplierDelayAlerts   Boolean  @default(false)
+  orderUpdates          Boolean  @default(false)
   systemWarnings        Boolean  @default(true)
   approvalRequests      Boolean  @default(true)
-  stockAdjustments      Boolean  @default(true)
-  deliveryUpdates       Boolean  @default(true)
-  
+  stockAdjustments      Boolean  @default(false)
+  deliveryUpdates       Boolean  @default(false)
   criticalAlerts        Boolean  @default(true)
   warningAlerts         Boolean  @default(true)
   infoAlerts            Boolean  @default(true)
-  
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 }
@@ -679,7 +897,7 @@ model EmailLog {
   errorMessage    String?
   sentAt          DateTime?
   createdAt       DateTime    @default(now())
-  
+
   @@index([notificationId])
   @@index([status])
   @@index([sentAt])
@@ -727,12 +945,48 @@ model SavedReport {
 // ==================== AUDIT LOG ====================
 
 model AuditLog {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  action    String
-  entity    String
-  entityId  String?
-  details   Json?
-  createdAt DateTime @default(now())
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  action      String
+  entity      String
+  entityId    String?
+  details     Json?
+  createdAt   DateTime @default(now())
+  userName    String?
+  userRole    String?
+  module      String?
+  description String?
+  oldValues   Json?
+  newValues   Json?
+  ipAddress   String?
+  userAgent   String?
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([action])
+  @@index([entity])
+  @@index([module])
+}
+
+// ==================== PRODUCTION MODEL ====================
+
+model ProductionBatch {
+  id                String    @id @default(uuid())
+  batchNumber       String    @unique
+  productId         String
+  product           Product   @relation(fields: [productId], references: [id])
+  quantityProduced  Int
+  unit              String    @default("piece")
+  rawMaterialsUsed  Json
+  startDate         DateTime?
+  notes             String?
+  createdById       String
+  createdBy         User      @relation("ProductionCreator", fields: [createdById], references: [id])
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([productId])
+  @@index([batchNumber])
+  @@index([createdAt])
 }

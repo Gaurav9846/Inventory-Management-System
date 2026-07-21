@@ -10,6 +10,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
+     "fix:audit-logs": "node prisma/scripts/fix-audit-logs.js",
+     "fix:audit-descriptions": "node prisma/scripts/fix-audit-descriptions.js",
+       "fix:deliveries": "node prisma/scripts/fixMissingDeliveries.js",
     "prisma:seed": "node prisma/seed.js"
   },
   "dependencies": {
@@ -19,12 +22,16 @@
     "cloudinary": "^2.9.0",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
-    "nodemailer": "^8.0.1"
+    "node-cron": "^4.6.0",
+    "nodemailer": "^8.0.1",
+    "pdfkit": "^0.19.1"
   },
   "devDependencies": {
+    "@types/pdfkit": "^0.17.6",
     "nodemon": "^3.1.11",
     "prisma": "^6.6.0"
   }

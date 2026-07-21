@@ -1,250 +1,836 @@
-// src/pages/manager/ManagerProducts.jsx
-import { useEffect, useState, useCallback } from "react";
-import { productsApi, categoriesApi, suppliersApi } from "@/api/index.js";
-import { Card, CardContent } from "@/components/ui/card.jsx";
-import { Button } from "@/components/ui/button.jsx";
-import { Input } from "@/components/ui/input.jsx";
-import { Label } from "@/components/ui/label.jsx";
-import { Textarea } from "@/components/ui/textarea.jsx";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.jsx";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog.jsx";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table.jsx";
-import { Badge } from "@/components/ui/badge.jsx";
-import { TableSkeleton } from "@/components/shared/LoadingSpinner.jsx";
-import { PageHeader } from "@/components/shared/PageHeader.jsx";
-import { ConfirmDialog } from "@/components/shared/ConfirmDialog.jsx";
-import { Search, Pencil, Trash2, ImageOff, Package, AlertTriangle } from "lucide-react";
-import { toast } from "sonner";
-import { formatCurrency } from "@/utils/helpers.js";
+// src/pages/manager/ManagerProduction.jsx
+import { useState, useEffect } from 'react';
+import { productionApi, productsApi, rawMaterialsApi } from '@/api/index.js';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { 
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter
+} from '@/components/ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Plus, RefreshCw, 
+  Package, Search, Calendar, 
+  Trash2, Factory,
+  Layers, X, 
+  Eye, DollarSign,
+  ClipboardListIcon, TrendingUp, TrendingDown
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { formatDate, formatCurrency } from '@/utils/helpers';
 
-const EMPTY = { name: "", sku: "", description: "", unit: "piece", reorderLevel: 10, currentStock: 0, costPrice: "", sellingPrice: "", categoryId: "", supplierId: "" };
+export default function ManagerProduction() {
+  const [loading, setLoading] = useState(true);
+  const [batches, setBatches] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [rawMaterials, setRawMaterials] = useState([]);
+  const [selectedBatch, setSelectedBatch] = useState(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [comparisonPeriod, setComparisonPeriod] = useState('yesterday');
 
-function ProductFormDialog({ open, onOpenChange, editData, categories, suppliers, onSaved }) {
-  const [form,    setForm]    = useState(EMPTY);
-  const [image,   setImage]   = useState(null);
-  const [preview, setPreview] = useState(null);
-  const [saving,  setSaving]  = useState(false);
+  // Stats
+  const [stats, setStats] = useState({
+    totalBatches: 0,
+    totalFinishedGoods: 0,
+    estimatedCost: 0,
+    totalRawUsed: 0,
+    comparisons: {
+      totalBatches: { value: 0, trend: 'up' },
+      totalFinishedGoods: { value: 0, trend: 'up' },
+      estimatedCost: { value: 0, trend: 'up' },
+      totalRawUsed: { value: 0, trend: 'up' }
+    }
+  });
+
+  const [formData, setFormData] = useState({
+    productId: '',
+    quantityProduced: '',
+    manufacturingDate: new Date().toISOString().split('T')[0],
+    rawMaterialsUsed: [{ rawMaterialId: '', quantity: '' }]
+  });
 
   useEffect(() => {
-    if (open) {
-      setForm(editData ? { ...EMPTY, ...editData, categoryId: editData.categoryId || "", supplierId: editData.supplierId || "" } : EMPTY);
-      setImage(null);
-      setPreview(editData?.imageUrl || null);
-    }
-  }, [open, editData]);
+    fetchData();
+  }, []);
 
-  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
-
-  const handleFile = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setImage(file);
-    setPreview(URL.createObjectURL(file));
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!form.name || !form.categoryId) return toast.error("Name and category are required.");
-    setSaving(true);
+  const fetchData = async () => {
+    setLoading(true);
     try {
-      const fd = new FormData();
-      Object.entries(form).forEach(([k, v]) => { if (v !== "" && v != null) fd.append(k, v); });
-      if (image) fd.append("image", image);
-      if (editData) { await productsApi.update(editData.id, fd); toast.success("Product updated."); }
-      else          { await productsApi.create(fd);              toast.success("Product created."); }
-      onSaved(); onOpenChange(false);
-    } catch (err) { toast.error(err.response?.data?.message || "Failed."); }
-    finally { setSaving(false); }
+      const [batchesRes, productsRes, rawRes] = await Promise.all([
+        productionApi.getAll({ limit: 1000 }),
+        productsApi.getAll(),
+        rawMaterialsApi.getAll(),
+      ]);
+
+      const allBatches = batchesRes.data.data || [];
+      setBatches(allBatches);
+      setProducts(productsRes.data || []);
+      setRawMaterials(rawRes.data?.data || rawRes.data || []);
+
+      // Calculate current stats
+      const totalBatches = allBatches.length;
+      const totalFinishedGoods = allBatches.reduce((sum, b) => sum + (b.quantityProduced || 0), 0);
+      
+      let totalRawUsed = 0;
+      let totalCost = 0;
+      
+      allBatches.forEach(batch => {
+        const materials = batch.rawMaterialsUsed || [];
+        materials.forEach(item => {
+          totalRawUsed += (item.quantity || 0);
+          totalCost += (item.unitCost || 0) * (item.quantity || 0);
+        });
+      });
+
+      // Calculate comparisons
+      const comparisons = calculateComparisons(allBatches);
+
+      setStats({
+        totalBatches,
+        totalFinishedGoods,
+        estimatedCost: totalCost,
+        totalRawUsed,
+        comparisons
+      });
+
+    } catch (error) {
+      console.error('Error fetching production data:', error);
+      toast.error('Failed to load production data');
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const calculateComparisons = (allBatches) => {
+    const now = new Date();
+    let previousStart, previousEnd, currentStart, currentEnd;
+    
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    
+    switch(comparisonPeriod) {
+      case 'yesterday': {
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const dayBefore = new Date(yesterday);
+        dayBefore.setDate(dayBefore.getDate() - 1);
+        currentStart = yesterday;
+        currentEnd = today;
+        previousStart = dayBefore;
+        previousEnd = yesterday;
+        break;
+      }
+      case 'week': {
+        const weekStart = new Date(today);
+        weekStart.setDate(weekStart.getDate() - 7);
+        const prevWeekStart = new Date(weekStart);
+        prevWeekStart.setDate(prevWeekStart.getDate() - 7);
+        currentStart = weekStart;
+        currentEnd = today;
+        previousStart = prevWeekStart;
+        previousEnd = weekStart;
+        break;
+      }
+      case 'month': {
+        const monthStart = new Date(today);
+        monthStart.setMonth(monthStart.getMonth() - 1);
+        const prevMonthStart = new Date(monthStart);
+        prevMonthStart.setMonth(prevMonthStart.getMonth() - 1);
+        currentStart = monthStart;
+        currentEnd = today;
+        previousStart = prevMonthStart;
+        previousEnd = monthStart;
+        break;
+      }
+      case 'year': {
+        const yearStart = new Date(today);
+        yearStart.setFullYear(yearStart.getFullYear() - 1);
+        const prevYearStart = new Date(yearStart);
+        prevYearStart.setFullYear(prevYearStart.getFullYear() - 1);
+        currentStart = yearStart;
+        currentEnd = today;
+        previousStart = prevYearStart;
+        previousEnd = yearStart;
+        break;
+      }
+      default:
+        return {};
+    }
+
+    const filterBatchesByDate = (start, end) => {
+      return allBatches.filter(batch => {
+        const batchDate = new Date(batch.createdAt);
+        return batchDate >= start && batchDate < end;
+      });
+    };
+
+    const currentBatches = filterBatchesByDate(currentStart, currentEnd);
+    const previousBatches = filterBatchesByDate(previousStart, previousEnd);
+
+    const currentMetrics = {
+      totalBatches: currentBatches.length,
+      totalFinishedGoods: currentBatches.reduce((sum, b) => sum + (b.quantityProduced || 0), 0),
+      estimatedCost: currentBatches.reduce((sum, b) => {
+        const materials = b.rawMaterialsUsed || [];
+        return sum + materials.reduce((s, item) => s + ((item.unitCost || 0) * (item.quantity || 0)), 0);
+      }, 0),
+      totalRawUsed: currentBatches.reduce((sum, b) => {
+        const materials = b.rawMaterialsUsed || [];
+        return sum + materials.reduce((s, item) => s + (item.quantity || 0), 0);
+      }, 0)
+    };
+
+    const previousMetrics = {
+      totalBatches: previousBatches.length,
+      totalFinishedGoods: previousBatches.reduce((sum, b) => sum + (b.quantityProduced || 0), 0),
+      estimatedCost: previousBatches.reduce((sum, b) => {
+        const materials = b.rawMaterialsUsed || [];
+        return sum + materials.reduce((s, item) => s + ((item.unitCost || 0) * (item.quantity || 0)), 0);
+      }, 0),
+      totalRawUsed: previousBatches.reduce((sum, b) => {
+        const materials = b.rawMaterialsUsed || [];
+        return sum + materials.reduce((s, item) => s + (item.quantity || 0), 0);
+      }, 0)
+    };
+
+    const calculateChange = (current, previous) => {
+      if (previous === 0) return { value: current > 0 ? 100 : 0, trend: current > 0 ? 'up' : 'neutral' };
+      const change = ((current - previous) / previous) * 100;
+      return {
+        value: Math.abs(Math.round(change)),
+        trend: change >= 0 ? 'up' : 'down'
+      };
+    };
+
+    return {
+      totalBatches: calculateChange(currentMetrics.totalBatches, previousMetrics.totalBatches),
+      totalFinishedGoods: calculateChange(currentMetrics.totalFinishedGoods, previousMetrics.totalFinishedGoods),
+      estimatedCost: calculateChange(currentMetrics.estimatedCost, previousMetrics.estimatedCost),
+      totalRawUsed: calculateChange(currentMetrics.totalRawUsed, previousMetrics.totalRawUsed)
+    };
+  };
+
+  useEffect(() => {
+    if (batches.length > 0) {
+      const comparisons = calculateComparisons(batches);
+      setStats(prev => ({ ...prev, comparisons }));
+    }
+  }, [comparisonPeriod]);
+
+  const handleRefresh = () => {
+    fetchData();
+    toast.success('Data refreshed');
+  };
+
+  const handleAddRawMaterial = () => {
+    setFormData({
+      ...formData,
+      rawMaterialsUsed: [...formData.rawMaterialsUsed, { rawMaterialId: '', quantity: '' }]
+    });
+  };
+
+  const handleRemoveRawMaterial = (index) => {
+    if (formData.rawMaterialsUsed.length === 1) {
+      toast.error('At least one raw material is required');
+      return;
+    }
+    const updated = formData.rawMaterialsUsed.filter((_, i) => i !== index);
+    setFormData({ ...formData, rawMaterialsUsed: updated });
+  };
+
+  const handleRawMaterialChange = (index, field, value) => {
+    const updated = [...formData.rawMaterialsUsed];
+    updated[index][field] = value;
+    setFormData({ ...formData, rawMaterialsUsed: updated });
+  };
+
+  const handleCreateBatch = async (e) => {
+    e.preventDefault();
+    
+    if (!formData.productId) {
+      toast.error('Please select a product');
+      return;
+    }
+    if (!formData.quantityProduced || formData.quantityProduced <= 0) {
+      toast.error('Please enter valid quantity');
+      return;
+    }
+    if (formData.rawMaterialsUsed.some(r => !r.rawMaterialId || !r.quantity)) {
+      toast.error('Please fill all raw material fields');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await productionApi.create({
+        productId: formData.productId,
+        quantityProduced: parseInt(formData.quantityProduced),
+        rawMaterialsUsed: formData.rawMaterialsUsed.map(r => ({
+          rawMaterialId: r.rawMaterialId,
+          quantity: parseInt(r.quantity)
+        })),
+        startDate: formData.manufacturingDate
+      });
+
+      toast.success('Production record created successfully');
+      setDialogOpen(false);
+      resetForm();
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to create production record');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      productId: '',
+      quantityProduced: '',
+      manufacturingDate: new Date().toISOString().split('T')[0],
+      rawMaterialsUsed: [{ rawMaterialId: '', quantity: '' }]
+    });
+  };
+
+  const getFilteredBatches = () => {
+    if (dateFilter === 'all') return batches;
+    
+    const now = new Date();
+    let startDate = new Date();
+    
+    switch(dateFilter) {
+      case 'today':
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'week':
+        startDate.setDate(startDate.getDate() - 7);
+        break;
+      case 'month':
+        startDate.setMonth(startDate.getMonth() - 1);
+        break;
+      default:
+        return batches;
+    }
+    
+    return batches.filter(batch => new Date(batch.createdAt) >= startDate);
+  };
+
+  const filteredBatches = getFilteredBatches().filter(batch => 
+    batch.product?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    batch.batchNumber?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const dateFilterOptions = [
+    { value: 'all', label: 'All Time' },
+    { value: 'today', label: 'Today' },
+    { value: 'week', label: 'This Week' },
+    { value: 'month', label: 'This Month' },
+  ];
+
+  const comparisonOptions = [
+    { value: 'yesterday', label: 'Yesterday' },
+    { value: 'week', label: 'Previous Week' },
+    { value: 'month', label: 'Previous Month' },
+    { value: 'year', label: 'Previous Year' },
+  ];
+
+  // Helper function to render comparison
+  const renderComparison = (comparison) => {
+    if (!comparison || comparison.value === 0) return null;
+    
+    const isUp = comparison.trend === 'up';
+    const TrendIcon = isUp ? TrendingUp : TrendingDown;
+    const trendColor = isUp ? 'text-green-600' : 'text-red-600';
+    
+    return (
+      <div className={`flex items-center gap-1 mt-1 ${trendColor}`}>
+        <TrendIcon className="h-3 w-3" />
+        <span className="text-xs font-medium">
+          {comparison.value}% {isUp ? 'increase' : 'decrease'}
+        </span>
+      </div>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <div className="text-gray-500">Loading production data...</div>
+      </div>
+    );
+  }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader><DialogTitle>{editData ? "Edit Product" : "Add Product"}</DialogTitle></DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2 space-y-1.5"><Label>Name *</Label><Input value={form.name} onChange={(e) => set("name", e.target.value)} required placeholder="e.g. 20L Water Jar" /></div>
-            <div className="space-y-1.5"><Label>SKU</Label><Input value={form.sku} onChange={(e) => set("sku", e.target.value)} placeholder="WJ-20L-001" /></div>
-            <div className="space-y-1.5"><Label>Unit</Label><Input value={form.unit} onChange={(e) => set("unit", e.target.value)} placeholder="piece / bottle / litre" /></div>
-            <div className="space-y-1.5">
-              <Label>Category *</Label>
-              <Select value={form.categoryId} onValueChange={(v) => set("categoryId", v)}>
-                <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
-                <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-              </Select>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Inventory {'>'} Production</h1>
+          <p className="text-gray-600 mt-1">Manage production batches from raw materials to finished products</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleRefresh} className="gap-2">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+          <Button onClick={() => setDialogOpen(true)} className="gap-2 bg-blue-600 hover:bg-blue-700">
+            <Plus className="h-4 w-4" />
+            Create Production Record
+          </Button>
+        </div>
+      </div>
+
+      {/* Comparison Dropdown */}
+      <div className="flex justify-end">
+        <Select value={comparisonPeriod} onValueChange={setComparisonPeriod}>
+          <SelectTrigger className="w-40 h-8 text-sm">
+            <Calendar className="h-3.5 w-3.5 mr-2" />
+            <SelectValue placeholder="Compare to" />
+          </SelectTrigger>
+          <SelectContent>
+            {comparisonOptions.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card className="bg-gradient-to-br from-blue-50 to-blue-100/50 border-blue-200">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-2xl font-bold text-blue-700">{stats.totalBatches}</p>
+                <p className="text-xs text-blue-600">Total Production Batches</p>
+                {renderComparison(stats.comparisons.totalBatches)}
+              </div>
+              <div className="p-3 bg-blue-200/50 rounded-xl">
+                <Factory className="h-6 w-6 text-blue-600" />
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Supplier</Label>
-              <Select value={form.supplierId || "none"} onValueChange={(v) => set("supplierId", v === "none" ? "" : v)}>
-                <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-purple-50 to-purple-100/50 border-purple-200">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-2xl font-bold text-purple-700">{stats.totalFinishedGoods}</p>
+                <p className="text-xs text-purple-600">Total Finished Goods</p>
+                {renderComparison(stats.comparisons.totalFinishedGoods)}
+              </div>
+              <div className="p-3 bg-purple-200/50 rounded-xl">
+                <Package className="h-6 w-6 text-purple-700" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-green-50 to-green-100/50 border-green-200">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-2xl font-bold text-green-700">रू{(stats.estimatedCost || 0).toFixed(2)}</p>
+                <p className="text-xs text-green-600">Estimated Production Cost</p>
+                {renderComparison(stats.comparisons.estimatedCost)}
+              </div>
+              <div className="p-3 bg-green-200/50 rounded-xl">
+                <DollarSign className="h-6 w-6 text-green-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-orange-50 to-orange-100/50 border-orange-200">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-2xl font-bold text-orange-700">{stats.totalRawUsed}</p>
+                <p className="text-xs text-orange-600">Total Raw Materials Used</p>
+                {renderComparison(stats.comparisons.totalRawUsed)}
+              </div>
+              <div className="p-3 bg-orange-200/50 rounded-xl">
+                <ClipboardListIcon className="h-6 w-6 text-orange-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Production History */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap justify-between items-center gap-3">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <ClipboardListIcon className="h-5 w-5 text-blue-600" />
+              Production History
+            </CardTitle>
+            <div className="flex gap-2">
+              <div className="relative w-48">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  placeholder="Search..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9 h-8 text-sm"
+                />
+              </div>
+              <Select value={dateFilter} onValueChange={setDateFilter}>
+                <SelectTrigger className="w-32 h-8 text-sm">
+                  <Calendar className="h-3.5 w-3.5 mr-1" />
+                  <SelectValue placeholder="Date" />
+                </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                  {dateFilterOptions.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5"><Label>Cost Price (NPR)</Label><Input type="number" value={form.costPrice} onChange={(e) => set("costPrice", e.target.value)} placeholder="0.00" min="0" step="0.01" /></div>
-            <div className="space-y-1.5"><Label>Selling Price (NPR)</Label><Input type="number" value={form.sellingPrice} onChange={(e) => set("sellingPrice", e.target.value)} placeholder="0.00" min="0" step="0.01" /></div>
-            <div className="space-y-1.5"><Label>Current Stock</Label><Input type="number" value={form.currentStock} onChange={(e) => set("currentStock", e.target.value)} min="0" /></div>
-            <div className="space-y-1.5"><Label>Reorder Level</Label><Input type="number" value={form.reorderLevel} onChange={(e) => set("reorderLevel", e.target.value)} min="0" /></div>
-            <div className="col-span-2 space-y-1.5"><Label>Description</Label><Textarea value={form.description} onChange={(e) => set("description", e.target.value)} rows={2} /></div>
-            <div className="col-span-2 space-y-1.5">
-              <Label>Product Image</Label>
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-xl border-2 border-dashed border-slate-200 flex items-center justify-center bg-slate-50 overflow-hidden shrink-0">
-                  {preview ? <img src={preview} alt="preview" className="w-full h-full object-cover" /> : <ImageOff className="h-7 w-7 text-slate-400" />}
-                </div>
-                <Input type="file" accept="image/*" onChange={handleFile} className="cursor-pointer" />
-              </div>
-            </div>
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
-            <Button type="submit" disabled={saving} className="bg-emerald-600 hover:bg-emerald-700">
-              {saving ? "Saving…" : editData ? "Update Product" : "Create Product"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-export default function ManagerProducts() {
-  const [products,   setProducts]   = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [suppliers,  setSuppliers]  = useState([]);
-  const [loading,    setLoading]    = useState(true);
-  const [search,     setSearch]     = useState("");
-  const [filterCat,  setFilterCat]  = useState("all");
-  const [formOpen,   setFormOpen]   = useState(false);
-  const [editData,   setEditData]   = useState(null);
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [deleting,   setDeleting]   = useState(false);
-
-  const fetchAll = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = {};
-      if (search)              params.search     = search;
-      if (filterCat !== "all") params.categoryId = filterCat;
-      const [pRes, cRes, sRes] = await Promise.all([
-        productsApi.getAll(params),
-        categoriesApi.getAll(),
-        suppliersApi.getAll(),
-      ]);
-      setProducts(pRes.data);
-      setCategories(cRes.data);
-      setSuppliers(sRes.data);
-    } catch { toast.error("Failed to load products."); }
-    finally { setLoading(false); }
-  }, [search, filterCat]);
-
-  useEffect(() => { fetchAll(); }, [fetchAll]);
-
-  const handleDelete = async () => {
-    setDeleting(true);
-    try { await productsApi.remove(deleteTarget.id); toast.success("Product deleted."); setDeleteTarget(null); fetchAll(); }
-    catch (err) { toast.error(err.response?.data?.message || "Delete failed."); }
-    finally { setDeleting(false); }
-  };
-
-  return (
-    <div className="space-y-5">
-      <PageHeader
-        title="Products"
-        description="Manage product catalog, prices and availability"
-        actionLabel="Add Product"
-        onAction={() => { setEditData(null); setFormOpen(true); }}
-      />
-
-      <Card>
-        <CardContent className="p-4 flex flex-wrap gap-3 items-center">
-          <div className="relative flex-1 min-w-48">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search name or SKU…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
-          </div>
-          <Select value={filterCat} onValueChange={setFilterCat}>
-            <SelectTrigger className="w-44"><SelectValue placeholder="All categories" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">{products.length} products</p>
-        </CardContent>
-      </Card>
-
-      <Card>
+        </CardHeader>
         <CardContent className="p-0">
-          {loading ? <TableSkeleton rows={6} cols={7} /> : (
+          <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Product</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Stock</TableHead>
-                  <TableHead>Cost Price</TableHead>
-                  <TableHead>Selling Price</TableHead>
-                  <TableHead>Margin</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                <TableRow className="bg-gray-50">
+                  <TableHead className="text-xs">Batch #</TableHead>
+                  <TableHead className="text-xs">Product</TableHead>
+                  <TableHead className="text-xs text-center">Quantity</TableHead>
+                  <TableHead className="text-xs">Raw Materials</TableHead>
+                  <TableHead className="text-xs">Date</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {!products.length
-                  ? <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">No products found</TableCell></TableRow>
-                  : products.map((p) => {
-                    const isLow    = p.currentStock <= p.reorderLevel;
-                    const margin   = p.costPrice && p.sellingPrice
-                      ? (((p.sellingPrice - p.costPrice) / p.sellingPrice) * 100).toFixed(1)
-                      : null;
-                    return (
-                      <TableRow key={p.id} className={isLow ? "bg-red-50/40" : ""}>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-lg border bg-slate-50 overflow-hidden shrink-0 flex items-center justify-center">
-                              {p.imageUrl
-                                ? <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" />
-                                : <Package className="h-4 w-4 text-slate-400" />}
+                {filteredBatches.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center py-8 text-gray-500">
+                      No production records found
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredBatches.map((batch) => (
+                    <TableRow 
+                      key={batch.id} 
+                      className="hover:bg-gray-50 cursor-pointer"
+                      onClick={() => {
+                        setSelectedBatch(batch);
+                        setViewDialogOpen(true);
+                      }}
+                    >
+                      <TableCell className="font-mono text-xs font-medium">
+                        {batch.batchNumber}
+                      </TableCell>
+                      <TableCell>
+                        <p className="text-sm font-medium">{batch.product?.name}</p>
+                        <p className="text-xs text-gray-400">{batch.product?.unit}</p>
+                      </TableCell>
+                      <TableCell className="text-center font-semibold">
+                        {batch.quantityProduced}
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-xs">
+                          {(batch.rawMaterialsUsed || []).slice(0, 2).map((item, idx) => (
+                            <div key={idx} className="text-gray-600">
+                              {item.quantity}x {item.name || 'N/A'}
                             </div>
-                            <div>
-                              <p className="font-medium text-sm">{p.name}</p>
-                              <p className="text-xs text-muted-foreground font-mono">{p.sku || p.unit}</p>
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell><Badge variant="secondary" className="text-xs">{p.category?.name}</Badge></TableCell>
-                        <TableCell>
-                          <span className={`font-bold text-sm ${isLow ? "text-red-600" : "text-green-700"}`}>{p.currentStock}</span>
-                          <span className="text-xs text-muted-foreground ml-1">{p.unit}</span>
-                          {isLow && <AlertTriangle className="h-3.5 w-3.5 text-red-500 inline ml-1" />}
-                        </TableCell>
-                        <TableCell className="text-sm">{p.costPrice ? formatCurrency(p.costPrice) : "—"}</TableCell>
-                        <TableCell className="text-sm font-medium">{p.sellingPrice ? formatCurrency(p.sellingPrice) : "—"}</TableCell>
-                        <TableCell>
-                          {margin != null
-                            ? <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${Number(margin) >= 20 ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>{margin}%</span>
-                            : <span className="text-xs text-muted-foreground">—</span>}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button size="icon" variant="ghost" onClick={() => { setEditData(p); setFormOpen(true); }}><Pencil className="h-4 w-4" /></Button>
-                            <Button size="icon" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDeleteTarget(p)}><Trash2 className="h-4 w-4" /></Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
+                          ))}
+                          {(batch.rawMaterialsUsed || []).length > 2 && (
+                            <div className="text-gray-400">+{batch.rawMaterialsUsed.length - 2} more</div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-500">
+                        {formatDate(batch.createdAt)}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
+          </div>
+          {filteredBatches.length > 0 && (
+            <div className="px-6 py-3 border-t text-sm text-gray-500">
+              Showing {filteredBatches.length} of {batches.length} batches
+            </div>
           )}
         </CardContent>
       </Card>
 
-      <ProductFormDialog open={formOpen} onOpenChange={setFormOpen} editData={editData} categories={categories} suppliers={suppliers} onSaved={fetchAll} />
-      <ConfirmDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}
-        title="Delete Product" description={`Delete "${deleteTarget?.name}"? This cannot be undone.`}
-        onConfirm={handleDelete} loading={deleting} />
+      {/* Create Production Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Factory className="h-5 w-5 text-blue-600" />
+              Create Production Record
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreateBatch}>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Left Column */}
+              <div className="lg:col-span-2 space-y-4">
+                {/* Production Information */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Production Information</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs text-gray-500">Production Date</Label>
+                      <Input 
+                        type="date"
+                        value={formData.manufacturingDate}
+                        onChange={(e) => setFormData({ ...formData, manufacturingDate: e.target.value })}
+                        className="mt-1 h-9 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Finished Product */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Finished Product</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs text-gray-500">Product *</Label>
+                      <Select 
+                        value={formData.productId} 
+                        onValueChange={(v) => setFormData({ ...formData, productId: v })}
+                      >
+                        <SelectTrigger className="mt-1 h-9 text-sm">
+                          <SelectValue placeholder="Select product..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {products.map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.name} - Stock: {p.currentStock} {p.unit}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-gray-500">Quantity Produced *</Label>
+                      <Input 
+                        type="number"
+                        min="1"
+                        placeholder="Enter quantity"
+                        value={formData.quantityProduced}
+                        onChange={(e) => setFormData({ ...formData, quantityProduced: e.target.value })}
+                        className="mt-1 h-9 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Raw Materials */}
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-gray-700">Raw Materials Used</h3>
+                    <Button 
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleAddRawMaterial}
+                      className="h-8 text-xs"
+                    >
+                      <Plus className="h-3.5 w-3.5 mr-1" />
+                      Add Material
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    {formData.rawMaterialsUsed.map((item, index) => (
+                      <div key={index} className="grid grid-cols-12 gap-2 items-end p-3 bg-gray-50 rounded-lg border">
+                        <div className="col-span-5">
+                          <Label className="text-xs text-gray-500">Material Name</Label>
+                          <Select 
+                            value={item.rawMaterialId} 
+                            onValueChange={(v) => handleRawMaterialChange(index, 'rawMaterialId', v)}
+                          >
+                            <SelectTrigger className="mt-1 h-8 text-xs">
+                              <SelectValue placeholder="Select..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {rawMaterials.map((rm) => (
+                                <SelectItem key={rm.id} value={rm.id}>
+                                  {rm.name} - Stock: {rm.currentStock} {rm.unit}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="col-span-3">
+                          <Label className="text-xs text-gray-500">Required Qty</Label>
+                          <Input 
+                            type="number"
+                            min="1"
+                            placeholder="Qty"
+                            value={item.quantity}
+                            onChange={(e) => handleRawMaterialChange(index, 'quantity', e.target.value)}
+                            className="mt-1 h-8 text-sm"
+                          />
+                        </div>
+                        <div className="col-span-3">
+                          <Label className="text-xs text-gray-500">Available Stock</Label>
+                          <Input 
+                            value={rawMaterials.find(r => r.id === item.rawMaterialId)?.currentStock || 0}
+                            disabled
+                            className="mt-1 h-8 bg-gray-100 text-sm"
+                          />
+                        </div>
+                        <div className="col-span-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-red-500 hover:text-red-600"
+                            onClick={() => handleRemoveRawMaterial(index)}
+                            disabled={formData.rawMaterialsUsed.length === 1}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column - Summary */}
+              <div className="space-y-4">
+                <Card className="border-2 border-blue-200 bg-blue-50/30">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                      <Layers className="h-4 w-4 text-blue-600" />
+                      Production Summary
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <div className="flex justify-between py-1.5 border-b">
+                      <span className="text-gray-600">Total Quantity Produced</span>
+                      <span className="font-semibold">
+                        {formData.quantityProduced || 0} units
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1.5 border-b">
+                      <span className="text-gray-600">Total Raw Materials Used</span>
+                      <span className="font-semibold">
+                        {formData.rawMaterialsUsed.reduce((sum, r) => sum + (parseInt(r.quantity) || 0), 0)} units
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1.5 border-b">
+                      <span className="text-gray-600">Estimated Production Cost</span>
+                      <span className="font-semibold text-green-600">
+                        ₹{(formData.rawMaterialsUsed.reduce((sum, r) => {
+                          const material = rawMaterials.find(rm => rm.id === r.rawMaterialId);
+                          return sum + ((material?.unitCost || 0) * (parseInt(r.quantity) || 0));
+                        }, 0) || 0).toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1.5">
+                      <span className="text-gray-600">Total Items Consumed</span>
+                      <span className="font-semibold">
+                        {formData.rawMaterialsUsed.filter(r => r.rawMaterialId).length}
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <div className="space-y-2">
+                  <Button type="submit" disabled={submitting} className="w-full bg-blue-600 hover:bg-blue-700">
+                    {submitting ? 'Creating...' : 'Start Production'}
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} className="w-full text-red-600 border-red-300 hover:bg-red-50">
+                    <X className="h-4 w-4 mr-2" />
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Batch Dialog */}
+      <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5 text-blue-600" />
+              Production Batch Details
+            </DialogTitle>
+          </DialogHeader>
+          {selectedBatch && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-gray-500">Batch Number</p>
+                  <p className="font-semibold">{selectedBatch.batchNumber}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Product</p>
+                  <p className="font-medium">{selectedBatch.product?.name}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Quantity Produced</p>
+                  <p className="font-semibold">{selectedBatch.quantityProduced} {selectedBatch.unit}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Created By</p>
+                  <p>{selectedBatch.createdBy?.name}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Created At</p>
+                  <p>{formatDate(selectedBatch.createdAt)}</p>
+                </div>
+              </div>
+              
+              <div>
+                <p className="text-xs text-gray-500 mb-2">Raw Materials Used</p>
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-gray-50">
+                        <TableHead className="text-xs">Material</TableHead>
+                        <TableHead className="text-xs text-right">Quantity</TableHead>
+                        <TableHead className="text-xs text-right">Unit Cost</TableHead>
+                        <TableHead className="text-xs text-right">Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(selectedBatch.rawMaterialsUsed || []).map((item, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell className="text-sm">{item.name || 'N/A'}</TableCell>
+                          <TableCell className="text-sm text-right">{item.quantity}</TableCell>
+                          <TableCell className="text-sm text-right">₹{(item.unitCost || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-sm text-right font-semibold">₹{((item.unitCost || 0) * (item.quantity || 0)).toFixed(2)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                    <TableFooter>
+                      <TableRow className="bg-gray-50">
+                        <TableCell colSpan={3} className="text-right font-semibold">Total Cost</TableCell>
+                        <TableCell className="text-right font-bold">
+                          ₹{(selectedBatch.rawMaterialsUsed || []).reduce((sum, item) => sum + ((item.unitCost || 0) * (item.quantity || 0)), 0).toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    </TableFooter>
+                  </Table>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setViewDialogOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

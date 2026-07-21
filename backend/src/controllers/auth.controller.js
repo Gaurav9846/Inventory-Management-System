@@ -9,7 +9,7 @@ const signToken = (id) =>
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",
   });
 
-// POST /api/auth/login
+// POST /api/auth/login - ✅ FIXED to include phone and profileImage
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -24,26 +24,54 @@ export const login = async (req, res) => {
       return res.status(403).json({ message: "Account deactivated. Contact admin." });
 
     const token = signToken(user.id);
-    await logAction(user.id, "LOGIN", "User", user.id);
+
+    // ✅ Enhanced audit log with req for IP
+    await logAction({
+      userId: user.id,
+      action: "LOGIN",
+      entity: "User",
+      entityId: user.id,
+      module: "Authentication",
+      description: `User ${user.name} logged in successfully`,
+      req,
+    });
 
     res.json({
       token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: { 
+        id: user.id, 
+        name: user.name, 
+        email: user.email, 
+        role: user.role,
+        phone: user.phone,           // ✅ Added phone
+        profileImage: user.profileImage, // ✅ Added profileImage
+        createdAt: user.createdAt 
+      },
     });
   } catch (err) {
+    console.error("Login error:", err);
     res.status(500).json({ message: err.message });
   }
 };
 
-// GET /api/auth/me
+// GET /api/auth/me - ✅ FIXED to include phone and profileImage
 export const getMe = async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
-      where:  { id: req.user.id },
-      select: { id: true, name: true, email: true, role: true, createdAt: true },
+      where: { id: req.user.id },
+      select: { 
+        id: true, 
+        name: true, 
+        email: true, 
+        role: true, 
+        phone: true,           // ✅ Added phone
+        profileImage: true,    // ✅ Added profileImage
+        createdAt: true 
+      },
     });
     res.json(user);
   } catch (err) {
+    console.error("Get me error:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -61,10 +89,20 @@ export const changePassword = async (req, res) => {
 
     const hashed = await bcrypt.hash(newPassword, 10);
     await prisma.user.update({ where: { id: req.user.id }, data: { password: hashed } });
-    await logAction(req.user.id, "CHANGE_PASSWORD", "User", req.user.id);
+
+    await logAction({
+      userId: req.user.id,
+      action: "CHANGE_PASSWORD",
+      entity: "User",
+      entityId: req.user.id,
+      module: "Authentication",
+      description: `User ${req.user.name} changed their password`,
+      req,
+    });
 
     res.json({ message: "Password changed successfully." });
   } catch (err) {
+    console.error("Change password error:", err);
     res.status(500).json({ message: err.message });
   }
 };

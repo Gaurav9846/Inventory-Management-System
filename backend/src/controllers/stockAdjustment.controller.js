@@ -2,6 +2,7 @@
 import prisma from "../config/prisma.js";
 import { logAction } from "../utils/auditLog.js";
 import { generateOrderNumber } from "../utils/generateOrderNumber.js";
+import { createNotification } from "./notification.controller.js";
 
 // Predefined reasons (should match frontend)
 const VALID_REASONS = [
@@ -23,7 +24,6 @@ const VALID_REASONS = [
 // ==================== HELPER FUNCTIONS ====================
 
 const getItemType = async (productId) => {
-  // Check if product exists in Product table (finished goods)
   const product = await prisma.product.findUnique({
     where: { id: productId },
     select: { id: true }
@@ -33,7 +33,6 @@ const getItemType = async (productId) => {
     return { type: "PRODUCT", item: product };
   }
   
-  // Check if it's a raw material
   const rawMaterial = await prisma.rawMaterial.findUnique({
     where: { id: productId },
     select: { id: true }
@@ -117,7 +116,6 @@ export const getMyAdjustmentRequests = async (req, res) => {
       prisma.stockAdjustment.count({ where }),
     ]);
 
-    // Transform to include item type info
     const formattedRequests = requests.map(req => ({
       id: req.id,
       requestNumber: req.requestNumber,
@@ -163,7 +161,6 @@ export const createAdjustmentRequest = async (req, res) => {
       reason,
     } = req.body;
 
-    // Validation
     if (!productId) {
       return res.status(400).json({ message: "Product is required" });
     }
@@ -174,18 +171,15 @@ export const createAdjustmentRequest = async (req, res) => {
       return res.status(400).json({ message: "Reason is required" });
     }
     
-    // Validate reason is from predefined list
     if (!VALID_REASONS.includes(reason)) {
       return res.status(400).json({ message: "Invalid reason selected" });
     }
 
-    // Determine if product is raw material or finished product
     const itemInfo = await getItemType(productId);
     if (!itemInfo) {
       return res.status(404).json({ message: "Product not found" });
     }
 
-    // Get current stock
     const stockInfo = await getCurrentStock(productId, itemInfo.type);
     if (!stockInfo) {
       return res.status(404).json({ message: "Product not found" });
@@ -195,14 +189,12 @@ export const createAdjustmentRequest = async (req, res) => {
     const requestedQty = Number(requestedQuantity);
     const newStock = currentStock + requestedQty;
 
-    // Validate
     if (newStock < 0) {
       return res.status(400).json({ 
         message: `Cannot adjust stock below zero. Current stock: ${currentStock}, Requested change: ${requestedQty}` 
       });
     }
 
-    // Create adjustment request
     const adjustment = await prisma.stockAdjustment.create({
       data: {
         requestNumber: generateOrderNumber("ADJ"),
@@ -236,6 +228,17 @@ export const createAdjustmentRequest = async (req, res) => {
       itemType: itemInfo.type,
       requestedQuantity,
       reason,
+    });
+
+    // ✅ CREATE NOTIFICATION FOR NEW ADJUSTMENT REQUEST
+    await createNotification({
+      title: `📋 Stock Adjustment Request: ${adjustment.requestNumber}`,
+      message: `Stock adjustment request #${adjustment.requestNumber} created by ${req.user.name}. Product: ${adjustment.product.name}. Requested change: ${adjustment.requestedQuantity > 0 ? '+' : ''}${adjustment.requestedQuantity} units. Reason: ${adjustment.reason}.`,
+      type: 'APPROVAL_REQUEST',
+      priority: 'WARNING',
+      referenceId: adjustment.id,
+      referenceType: 'StockAdjustment',
+      actionUrl: `/stock-adjustments/${adjustment.id}`,
     });
 
     res.status(201).json({
@@ -322,7 +325,6 @@ export const getPendingAdjustments = async (req, res) => {
       prisma.stockAdjustment.count({ where }),
     ]);
 
-    // Transform to include item type
     const formattedRequests = requests.map(req => ({
       id: req.id,
       requestNumber: req.requestNumber,
@@ -435,6 +437,10 @@ export const approveAdjustment = async (req, res) => {
 
     const adjustment = await prisma.stockAdjustment.findUnique({
       where: { id },
+      include: {
+        product: { select: { name: true } },
+        requestedBy: { select: { name: true } }
+      }
     });
 
     if (!adjustment) {
@@ -447,12 +453,9 @@ export const approveAdjustment = async (req, res) => {
       });
     }
 
-    // Start transaction
     const result = await prisma.$transaction(async (tx) => {
-      // Update product/raw material stock based on itemType
       const updatedItem = await updateStock(tx, adjustment.productId, adjustment.itemType, adjustment.newStock);
 
-      // Create stock transaction record
       const stockTransaction = await tx.stockTransaction.create({
         data: {
           productId: adjustment.itemType === "PRODUCT" ? adjustment.productId : null,
@@ -466,7 +469,6 @@ export const approveAdjustment = async (req, res) => {
         },
       });
 
-      // Update adjustment request
       const updatedAdjustment = await tx.stockAdjustment.update({
         where: { id },
         data: {
@@ -484,6 +486,17 @@ export const approveAdjustment = async (req, res) => {
       itemType: adjustment.itemType,
       requestedQuantity: adjustment.requestedQuantity,
       newStock: adjustment.newStock,
+    });
+
+    // ✅ CREATE NOTIFICATION FOR ADJUSTMENT APPROVAL
+    await createNotification({
+      title: `✅ Stock Adjustment Approved: ${adjustment.requestNumber}`,
+      message: `Stock adjustment request #${adjustment.requestNumber} has been APPROVED by ${req.user.name}. Product: ${adjustment.product.name}. New stock: ${adjustment.newStock} units.`,
+      type: 'APPROVAL_REQUEST',
+      priority: 'INFORMATION',
+      referenceId: adjustment.id,
+      referenceType: 'StockAdjustment',
+      actionUrl: `/stock-adjustments/${adjustment.id}`,
     });
 
     res.json({
@@ -509,6 +522,10 @@ export const rejectAdjustment = async (req, res) => {
 
     const adjustment = await prisma.stockAdjustment.findUnique({
       where: { id },
+      include: {
+        product: { select: { name: true } },
+        requestedBy: { select: { name: true } }
+      }
     });
 
     if (!adjustment) {
@@ -533,6 +550,17 @@ export const rejectAdjustment = async (req, res) => {
 
     await logAction(req.user.id, "REJECT", "StockAdjustment", id, {
       rejectionReason,
+    });
+
+    // ✅ CREATE NOTIFICATION FOR ADJUSTMENT REJECTION
+    await createNotification({
+      title: `❌ Stock Adjustment Rejected: ${adjustment.requestNumber}`,
+      message: `Stock adjustment request #${adjustment.requestNumber} has been REJECTED by ${req.user.name}. Reason: ${rejectionReason}.`,
+      type: 'APPROVAL_REQUEST',
+      priority: 'WARNING',
+      referenceId: adjustment.id,
+      referenceType: 'StockAdjustment',
+      actionUrl: `/stock-adjustments/${adjustment.id}`,
     });
 
     res.json({

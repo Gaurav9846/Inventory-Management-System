@@ -1,14 +1,9 @@
 // src/controllers/customer.controller.js
+
 import prisma from "../config/prisma.js";
 import { logAction } from "../utils/auditLog.js";
 
-// GET all customers (with pagination and search)
-// src/controllers/customer.controller.js - Updated getAllCustomers
-
-// src/controllers/customer.controller.js - Updated getAllCustomers
-
-// src/controllers/customer.controller.js - Updated getAllCustomers
-
+// ==================== GET ALL CUSTOMERS ====================
 export const getAllCustomers = async (req, res) => {
   try {
     const { search, page = 1, limit = 10 } = req.query;
@@ -26,7 +21,13 @@ export const getAllCustomers = async (req, res) => {
       prisma.customer.findMany({
         where,
         include: {
-          creditAccount: true,
+          creditAccount: {
+            include: {
+              payments: {
+                where: { status: "COMPLETED" },
+              },
+            },
+          },
           _count: { select: { salesOrders: true } },
         },
         orderBy: { name: "asc" },
@@ -36,23 +37,45 @@ export const getAllCustomers = async (req, res) => {
       prisma.customer.count({ where }),
     ]);
 
-    // Calculate total paid for each customer
     const customersWithTotalPaid = await Promise.all(
       customers.map(async (customer) => {
-        // Get total paid amount from completed payments
+        // ✅ Calculate total paid from CREDIT PAYMENTS (installments)
+        let totalPaidFromCredit = 0;
+        let totalCreditGiven = 0;
+        
+        if (customer.creditAccount) {
+          // Sum all completed credit payments
+          totalPaidFromCredit = customer.creditAccount.payments.reduce(
+            (sum, payment) => sum + (payment.amount || 0), 0
+          );
+          
+          // Total credit given = total credit amount
+          totalCreditGiven = customer.creditAccount.totalCredit || 0;
+        }
+        
+        // ✅ Get completed cash/online payments from sales orders
         const totalPaidResult = await prisma.payment.aggregate({
           where: {
             salesOrder: {
               customerId: customer.id,
             },
             status: "COMPLETED",
+            method: {
+              not: "CREDIT",
+            },
           },
           _sum: {
             amount: true,
           },
         });
         
-        const totalPaid = totalPaidResult._sum.amount || 0;
+        const cashOnlinePaid = totalPaidResult._sum.amount || 0;
+        
+        // ✅ TOTAL PAID = Cash/Online payments + Credit payments (installments)
+        const totalPaid = cashOnlinePaid + totalPaidFromCredit;
+        
+        // ✅ OUTSTANDING CREDIT = Total credit given - Total credit paid
+        const outstandingCredit = customer.creditAccount?.remainingBalance || customer.outstandingCredit || 0;
         
         return {
           id: customer.id,
@@ -63,8 +86,8 @@ export const getAllCustomers = async (req, res) => {
           deliveryAddress: customer.deliveryAddress,
           customerType: customer.customerType,
           initials: customer.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2),
-          outstandingCredit: customer.creditAccount?.remainingBalance || customer.outstandingCredit || 0,
-          totalPaid: totalPaid, // ✅ Add total paid
+          outstandingCredit: outstandingCredit,
+          totalPaid: totalPaid,
           totalOrders: customer._count.salesOrders,
           creditLimit: customer.creditLimit,
           createdAt: customer.createdAt,
@@ -87,9 +110,7 @@ export const getAllCustomers = async (req, res) => {
   }
 };
 
-// GET single customer with order and payment history
-// src/controllers/customer.controller.js - Updated getCustomerById
-
+// ==================== GET SINGLE CUSTOMER ====================
 export const getCustomerById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -97,7 +118,22 @@ export const getCustomerById = async (req, res) => {
     const customer = await prisma.customer.findUnique({
       where: { id },
       include: {
-        creditAccount: true,
+        creditAccount: {
+          include: {
+            payments: {
+              orderBy: { paymentDate: "desc" },
+              include: {
+                recordedBy: { select: { name: true } },
+                paymentDetails: {
+                  include: {
+                    product: { select: { id: true, name: true, unit: true } },
+                    salesOrder: { select: { id: true, orderNumber: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
     
@@ -105,22 +141,33 @@ export const getCustomerById = async (req, res) => {
       return res.status(404).json({ message: "Customer not found." });
     }
     
-    // Get total paid amount
+    // ✅ Calculate total paid from credit payments
+    let totalPaidFromCredit = 0;
+    if (customer.creditAccount) {
+      totalPaidFromCredit = customer.creditAccount.payments.reduce(
+        (sum, payment) => sum + (payment.amount || 0), 0
+      );
+    }
+    
+    // ✅ Get completed cash/online payments
     const totalPaidResult = await prisma.payment.aggregate({
       where: {
         salesOrder: {
           customerId: id,
         },
         status: "COMPLETED",
+        method: {
+          not: "CREDIT",
+        },
       },
       _sum: {
         amount: true,
       },
     });
     
-    const totalPaid = totalPaidResult._sum.amount || 0;
+    const cashOnlinePaid = totalPaidResult._sum.amount || 0;
+    const totalPaid = cashOnlinePaid + totalPaidFromCredit;
     
-    // Get order history
     const orders = await prisma.salesOrder.findMany({
       where: { customerId: id },
       orderBy: { createdAt: "desc" },
@@ -138,6 +185,7 @@ export const getCustomerById = async (req, res) => {
       status: order.status,
       deliveryStatus: order.delivery?.status || "PENDING",
       paymentMethod: order.payment?.method || "N/A",
+      paymentStatus: order.payment?.status || "N/A",
       items: order.items.map(item => ({
         name: item.product.name,
         quantity: item.quantity,
@@ -145,23 +193,44 @@ export const getCustomerById = async (req, res) => {
       })),
     }));
     
-    // Get payment history
-    const payments = await prisma.payment.findMany({
+    // ✅ Credit payment history
+    const creditPaymentHistory = customer.creditAccount?.payments.map(payment => ({
+      type: "CREDIT_PAYMENT",
+      date: payment.paymentDate,
+      amount: payment.amount,
+      transactionId: payment.transactionId || payment.id,
+      method: payment.paymentMethod,
+      platform: payment.paymentPlatform,
+      notes: payment.notes,
+      orderId: payment.paymentDetails?.map(d => d.salesOrder?.orderNumber).join(", ") || "N/A",
+      products: payment.paymentDetails?.map(d => `${d.quantity}x ${d.product?.name}`).join(", ") || "N/A",
+    })) || [];
+    
+    // ✅ Cash/Online payment history
+    const cashOnlinePayments = await prisma.payment.findMany({
       where: {
         salesOrder: { customerId: id },
         status: "COMPLETED",
+        method: {
+          not: "CREDIT",
+        },
       },
       orderBy: { createdAt: "desc" },
       include: { salesOrder: { select: { orderNumber: true } } },
     });
     
-    const paymentHistory = payments.map(payment => ({
+    const cashOnlinePaymentHistory = cashOnlinePayments.map(payment => ({
       type: payment.method,
       date: payment.createdAt,
       amount: payment.amount,
       transactionId: payment.khaltiTransactionId || payment.id,
       orderId: payment.salesOrder.orderNumber,
     }));
+    
+    // ✅ Combine payment histories
+    const paymentHistory = [...creditPaymentHistory, ...cashOnlinePaymentHistory].sort(
+      (a, b) => new Date(b.date) - new Date(a.date)
+    );
     
     res.json({
       id: customer.id,
@@ -173,7 +242,7 @@ export const getCustomerById = async (req, res) => {
       notes: customer.notes,
       customerType: customer.customerType,
       outstandingCredit: customer.creditAccount?.remainingBalance || customer.outstandingCredit || 0,
-      totalPaid: totalPaid, // ✅ Add total paid
+      totalPaid: totalPaid,
       creditLimit: customer.creditLimit || 0,
       creditAccount: customer.creditAccount,
       orderHistory,
@@ -187,6 +256,7 @@ export const getCustomerById = async (req, res) => {
   }
 };
 
+// ==================== CREATE CUSTOMER ====================
 export const createCustomer = async (req, res) => {
   try {
     const { name, email, phone, address, deliveryAddress, customerType, creditLimit, notes } = req.body;
@@ -209,7 +279,17 @@ export const createCustomer = async (req, res) => {
       },
     });
     
-    await logAction(req.user.id, "CREATE", "Customer", customer.id, { name, phone });
+    await logAction({
+      userId: req.user.id,
+      action: "CREATE",
+      entity: "Customer",
+      entityId: customer.id,
+      module: "Customers",
+      description: `Created customer: ${customer.name}`,
+      newValues: { name: customer.name, phone: customer.phone, email: customer.email, customerType: customer.customerType },
+      req,
+    });
+    
     res.status(201).json(customer);
   } catch (err) {
     console.error(err);
@@ -217,9 +297,20 @@ export const createCustomer = async (req, res) => {
   }
 };
 
+// ==================== UPDATE CUSTOMER ====================
 export const updateCustomer = async (req, res) => {
   try {
+    const { id } = req.params;
     const { name, email, phone, address, deliveryAddress, customerType, creditLimit, notes } = req.body;
+    
+    const oldCustomer = await prisma.customer.findUnique({
+      where: { id },
+      select: { name: true, email: true, phone: true, customerType: true, creditLimit: true }
+    });
+    
+    if (!oldCustomer) {
+      return res.status(404).json({ message: "Customer not found." });
+    }
     
     const customer = await prisma.customer.update({
       where: { id: req.params.id },
@@ -235,7 +326,30 @@ export const updateCustomer = async (req, res) => {
       },
     });
     
-    await logAction(req.user.id, "UPDATE", "Customer", customer.id, req.body);
+    await logAction({
+      userId: req.user.id,
+      action: "UPDATE",
+      entity: "Customer",
+      entityId: customer.id,
+      module: "Customers",
+      description: `Updated customer: ${customer.name}`,
+      oldValues: { 
+        name: oldCustomer.name, 
+        phone: oldCustomer.phone, 
+        email: oldCustomer.email,
+        customerType: oldCustomer.customerType,
+        creditLimit: oldCustomer.creditLimit,
+      },
+      newValues: { 
+        name: customer.name, 
+        phone: customer.phone, 
+        email: customer.email,
+        customerType: customer.customerType,
+        creditLimit: customer.creditLimit,
+      },
+      req,
+    });
+    
     res.json(customer);
   } catch (err) {
     if (err.code === "P2025") {
@@ -245,6 +359,7 @@ export const updateCustomer = async (req, res) => {
   }
 };
 
+// ==================== DELETE CUSTOMER ====================
 export const deleteCustomer = async (req, res) => {
   try {
     const orderCount = await prisma.salesOrder.count({
@@ -255,8 +370,23 @@ export const deleteCustomer = async (req, res) => {
       return res.status(400).json({ message: "Cannot delete customer with existing orders." });
     }
     
+    const customer = await prisma.customer.findUnique({
+      where: { id: req.params.id },
+      select: { name: true }
+    });
+    
     await prisma.customer.delete({ where: { id: req.params.id } });
-    await logAction(req.user.id, "DELETE", "Customer", req.params.id);
+    
+    await logAction({
+      userId: req.user.id,
+      action: "DELETE",
+      entity: "Customer",
+      entityId: req.params.id,
+      module: "Customers",
+      description: `Deleted customer: ${customer?.name}`,
+      req,
+    });
+    
     res.json({ message: "Customer deleted successfully." });
   } catch (err) {
     if (err.code === "P2025") {

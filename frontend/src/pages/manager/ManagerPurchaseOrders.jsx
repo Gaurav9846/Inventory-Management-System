@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency, formatDate } from "@/utils/helpers.js";
+import { useNavigation } from "@/hooks/useNavigation.js";
 
 const STATUS_OPTIONS = [
   { value: "PENDING", label: "Pending Approval", color: "bg-yellow-100 text-yellow-700", icon: Clock },
@@ -36,6 +37,7 @@ const PAYMENT_STATUS_COLORS = {
 
 export default function ManagerPurchaseOrders() {
   const navigate = useNavigate();
+  const { isAdmin, navigateTo, getBasePath } = useNavigation();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -61,6 +63,14 @@ export default function ManagerPurchaseOrders() {
   useEffect(() => {
     fetchOrders();
   }, [pagination.page, search, statusFilter, paymentFilter, dateRange]);
+
+  const handleNavigate = (path) => {
+    if (isAdmin()) {
+      navigate(`/admin${path}`);
+    } else {
+      navigate(`/manager${path}`);
+    }
+  };
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -395,7 +405,7 @@ export default function ManagerPurchaseOrders() {
         description="Manage procurement from suppliers"
         actionLabel="Create PO"
         actionIcon={Plus}
-        onAction={() => navigate("/manager/purchase-orders/new")}
+        onAction={() => handleNavigate("/purchase-orders/new")}
       >
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={handlePrintPOs}>
@@ -546,7 +556,7 @@ export default function ManagerPurchaseOrders() {
                       <TableRow 
                         key={order.id} 
                         className="hover:bg-gray-50 cursor-pointer"
-                        onClick={() => navigate(`/manager/purchase-orders/${order.id}`)}
+                        onClick={() => handleNavigate(`/purchase-orders/${order.id}`)}
                       >
                         <TableCell className="font-mono font-medium text-sm">
                           {order.orderNumber}
@@ -582,7 +592,7 @@ export default function ManagerPurchaseOrders() {
                               size="sm" 
                               variant="ghost" 
                               className="h-8 w-8 p-0"
-                              onClick={() => navigate(`/manager/purchase-orders/${order.id}`)}
+                              onClick={() => handleNavigate(`/purchase-orders/${order.id}`)}
                             >
                               <Eye className="h-4 w-4" />
                             </Button>

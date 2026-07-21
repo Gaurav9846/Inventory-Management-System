@@ -2,6 +2,7 @@
 import prisma from "../config/prisma.js";
 import { uploadBuffer, deleteImage } from "../config/cloudinary.js";
 import { logAction } from "../utils/auditLog.js";
+import { createNotification } from "./notification.controller.js";
 
 // GET /api/products
 export const getAllProducts = async (req, res) => {
@@ -9,7 +10,6 @@ export const getAllProducts = async (req, res) => {
     const { categoryId, supplierId, search } = req.query;
     const lowStock = req.query.lowStock === "true";
 
-    // lowStock uses a raw query (field comparison in WHERE)
     if (lowStock) {
       const products = await prisma.$queryRaw`
         SELECT p.*, c.name AS "categoryName", s.name AS "supplierName"
@@ -28,7 +28,7 @@ export const getAllProducts = async (req, res) => {
       ...(search && {
         OR: [
           { name: { contains: search, mode: "insensitive" } },
-          { sku:  { contains: search, mode: "insensitive" } },
+          { sku: { contains: search, mode: "insensitive" } },
         ],
       }),
     };
@@ -47,11 +47,29 @@ export const getAllProducts = async (req, res) => {
   }
 };
 
+// GET /api/products/active
+export const getActiveProducts = async (req, res) => {
+  try {
+    const products = await prisma.product.findMany({
+      where: { isArchived: false },
+      include: {
+        category: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true } },
+      },
+      orderBy: { name: "asc" },
+    });
+    res.json(products);
+  } catch (err) {
+    console.error("Error in getActiveProducts:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
 // GET /api/products/:id
 export const getProductById = async (req, res) => {
   try {
     const product = await prisma.product.findUnique({
-      where:   { id: req.params.id },
+      where: { id: req.params.id },
       include: {
         category: true,
         supplier: { select: { id: true, name: true, phone: true, email: true } },
@@ -93,21 +111,42 @@ export const createProduct = async (req, res) => {
     const product = await prisma.product.create({
       data: {
         name,
-        sku:          sku       || null,
-        description:  description || null,
-        unit:         unit       || "piece",
-        reorderLevel: Number(reorderLevel)  || 10,
-        currentStock: Number(currentStock)  || 0,
-        costPrice:    costPrice  ? Number(costPrice)    : null,
+        sku: sku || null,
+        description: description || null,
+        unit: unit || "piece",
+        reorderLevel: Number(reorderLevel) || 10,
+        currentStock: Number(currentStock) || 0,
+        costPrice: costPrice ? Number(costPrice) : null,
         sellingPrice: sellingPrice ? Number(sellingPrice) : null,
         categoryId,
-        supplierId:   supplierId || null,
+        supplierId: supplierId || null,
         imageUrl,
         imagePublicId,
+        isArchived: false,
       },
     });
 
-    await logAction(req.user.id, "CREATE", "Product", product.id, { name, sku });
+    await logAction({
+      userId: req.user.id,
+      action: "CREATE",
+      entity: "Product",
+      entityId: product.id,
+      module: "Products",
+      description: `Created product: ${product.name}`,
+      newValues: { name: product.name, sku: product.sku, currentStock: product.currentStock },
+      req,
+    });
+
+    await createNotification({
+      title: `🆕 New Product Created: ${product.name}`,
+      message: `Product "${product.name}" has been added to inventory. SKU: ${product.sku || 'N/A'}. Initial stock: ${product.currentStock} ${product.unit}(s).`,
+      type: 'STOCK_ADJUSTMENT',
+      priority: 'INFORMATION',
+      referenceId: product.id,
+      referenceType: 'Product',
+      actionUrl: `/inventory/products/${product.id}`,
+    });
+
     res.status(201).json(product);
   } catch (err) {
     if (err.code === "P2002") return res.status(409).json({ message: "SKU already exists." });
@@ -121,14 +160,13 @@ export const updateProduct = async (req, res) => {
     const existing = await prisma.product.findUnique({ where: { id: req.params.id } });
     if (!existing) return res.status(404).json({ message: "Product not found." });
 
-    let imageUrl      = undefined;
+    let imageUrl = undefined;
     let imagePublicId = undefined;
 
     if (req.file) {
-      // Delete old image from Cloudinary first
       if (existing.imagePublicId) await deleteImage(existing.imagePublicId);
       const result = await uploadBuffer(req.file.buffer, "ims/products");
-      imageUrl      = result.url;
+      imageUrl = result.url;
       imagePublicId = result.publicId;
     }
 
@@ -138,21 +176,57 @@ export const updateProduct = async (req, res) => {
     } = req.body;
 
     const data = {
-      ...(name         !== undefined && { name }),
-      ...(sku          !== undefined && { sku }),
-      ...(description  !== undefined && { description }),
-      ...(unit         !== undefined && { unit }),
+      ...(name !== undefined && { name }),
+      ...(sku !== undefined && { sku }),
+      ...(description !== undefined && { description }),
+      ...(unit !== undefined && { unit }),
       ...(reorderLevel !== undefined && { reorderLevel: Number(reorderLevel) }),
-      ...(costPrice    !== undefined && { costPrice: Number(costPrice) }),
+      ...(costPrice !== undefined && { costPrice: Number(costPrice) }),
       ...(sellingPrice !== undefined && { sellingPrice: Number(sellingPrice) }),
-      ...(categoryId   !== undefined && { categoryId }),
-      ...(supplierId   !== undefined && { supplierId: supplierId || null }),
-      ...(imageUrl      !== undefined && { imageUrl }),
+      ...(categoryId !== undefined && { categoryId }),
+      ...(supplierId !== undefined && { supplierId: supplierId || null }),
+      ...(imageUrl !== undefined && { imageUrl }),
       ...(imagePublicId !== undefined && { imagePublicId }),
     };
 
     const product = await prisma.product.update({ where: { id: req.params.id }, data });
-    await logAction(req.user.id, "UPDATE", "Product", product.id, data);
+
+    await logAction({
+      userId: req.user.id,
+      action: "UPDATE",
+      entity: "Product",
+      entityId: product.id,
+      module: "Products",
+      description: `Updated product: ${product.name}`,
+      oldValues: { 
+        name: existing.name, 
+        sku: existing.sku, 
+        currentStock: existing.currentStock,
+        costPrice: existing.costPrice,
+        sellingPrice: existing.sellingPrice,
+        reorderLevel: existing.reorderLevel,
+      },
+      newValues: { 
+        name: product.name, 
+        sku: product.sku, 
+        currentStock: product.currentStock,
+        costPrice: product.costPrice,
+        sellingPrice: product.sellingPrice,
+        reorderLevel: product.reorderLevel,
+      },
+      req,
+    });
+
+    await createNotification({
+      title: `✏️ Product Updated: ${product.name}`,
+      message: `Product "${product.name}" details have been updated.`,
+      type: 'SYSTEM_WARNING',
+      priority: 'INFORMATION',
+      referenceId: product.id,
+      referenceType: 'Product',
+      actionUrl: `/inventory/products/${product.id}`,
+    });
+
     res.json(product);
   } catch (err) {
     if (err.code === "P2002") return res.status(409).json({ message: "SKU already exists." });
@@ -169,7 +243,27 @@ export const deleteProduct = async (req, res) => {
     if (product.imagePublicId) await deleteImage(product.imagePublicId);
 
     await prisma.product.delete({ where: { id: req.params.id } });
-    await logAction(req.user.id, "DELETE", "Product", req.params.id);
+
+    await logAction({
+      userId: req.user.id,
+      action: "DELETE",
+      entity: "Product",
+      entityId: req.params.id,
+      module: "Products",
+      description: `Deleted product: ${product.name}`,
+      oldValues: { name: product.name, sku: product.sku },
+      req,
+    });
+
+    await createNotification({
+      title: `🗑️ Product Deleted: ${product.name}`,
+      message: `Product "${product.name}" has been removed from inventory.`,
+      type: 'SYSTEM_WARNING',
+      priority: 'WARNING',
+      referenceId: req.params.id,
+      referenceType: 'Product',
+    });
+
     res.json({ message: "Product deleted." });
   } catch (err) {
     if (err.code === "P2003") return res.status(400).json({ message: "Cannot delete product with existing transactions." });

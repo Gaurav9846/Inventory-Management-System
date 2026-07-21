@@ -1,13 +1,40 @@
 // src/utils/helpers.js
 import { format, formatDistanceToNow as fnsFormatDistanceToNow } from "date-fns";
 
+/**
+ * Get initials from a name
+ * @param {string} name - Full name
+ * @returns {string} - Initials (e.g., "JD" for "John Doe")
+ */
+export const getInitials = (name) => {
+  // ✅ Handle null, undefined, or non-string values
+  if (!name || typeof name !== 'string') {
+    return '??';
+  }
+  const trimmed = name.trim();
+  if (trimmed.length === 0) {
+    return '??';
+  }
+  const parts = trimmed.split(' ');
+  if (parts.length === 0) {
+    return '??';
+  }
+  if (parts.length === 1) {
+    return parts[0].charAt(0).toUpperCase();
+  }
+  return parts
+    .filter(part => part.length > 0)
+    .map(part => part.charAt(0).toUpperCase())
+    .slice(0, 2)
+    .join('');
+};
+
 export const formatDate = (date, fmt = "dd MMM yyyy") =>
   date ? format(new Date(date), fmt) : "—";
 
 export const formatDateTime = (date) =>
   date ? format(new Date(date), "dd MMM yyyy, hh:mm a") : "—";
 
-// ✅ Add this export for formatDistanceToNow
 export const formatDistanceToNow = (date) =>
   date ? fnsFormatDistanceToNow(new Date(date), { addSuffix: true }) : "—";
 
@@ -47,6 +74,3 @@ export const statusColors = {
 
 export const truncate = (str, n = 40) =>
   str && str.length > n ? `${str.slice(0, n)}…` : str;
-
-export const getInitials = (name = "") =>
-  name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);

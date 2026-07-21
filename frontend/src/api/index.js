@@ -31,45 +31,44 @@ api.interceptors.response.use(
 export default api;
 
 export const authApi = {
-  login:          (data) => api.post("/auth/login", data),
-  me:             ()     => api.get("/auth/me"),
+  login: (data) => api.post("/auth/login", data),
+  me: () => api.get("/auth/me"),
   changePassword: (data) => api.patch("/auth/change-password", data),
 };
 
 export const usersApi = {
-  getAll:  ()         => api.get("/users"),
-  getById: (id)       => api.get(`/users/${id}`),
-  create:  (data)     => api.post("/users", data),
-  update:  (id, data) => api.patch(`/users/${id}`, data),
-  remove:  (id)       => api.delete(`/users/${id}`),
+  getAll: () => api.get("/users"),
+  getById: (id) => api.get(`/users/${id}`),
+  create: (data) => api.post("/users", data),
+  update: (id, data) => api.patch(`/users/${id}`, data),
+  remove: (id) => api.delete(`/users/${id}`),
 };
 
 export const categoriesApi = {
-  getAll:  ()         => api.get("/categories"),
-  getById: (id)       => api.get(`/categories/${id}`),
-  create:  (data)     => api.post("/categories", data),
-  update:  (id, data) => api.patch(`/categories/${id}`, data),
-  remove:  (id)       => api.delete(`/categories/${id}`),
+  getAll: () => api.get("/categories"),
+  getById: (id) => api.get(`/categories/${id}`),
+  create: (data) => api.post("/categories", data),
+  update: (id, data) => api.patch(`/categories/${id}`, data),
+  remove: (id) => api.delete(`/categories/${id}`),
 };
 
 export const productsApi = {
-  getAll:  (params)      => api.get("/products", { params }),
-  getById: (id)          => api.get(`/products/${id}`),
-  create:  (formData)    => api.post("/products", formData, { headers: { "Content-Type": "multipart/form-data" } }),
-  update:  (id, formData)=> api.patch(`/products/${id}`, formData, { headers: { "Content-Type": "multipart/form-data" } }),
-  remove:  (id)          => api.delete(`/products/${id}`),
+  getAll: (params) => api.get("/products", { params }),
+  getActive: () => api.get("/products/active"),
+  getById: (id) => api.get(`/products/${id}`),
+  create: (formData) => api.post("/products", formData, { headers: { "Content-Type": "multipart/form-data" } }),
+  update: (id, formData) => api.patch(`/products/${id}`, formData, { headers: { "Content-Type": "multipart/form-data" } }),
+  remove: (id) => api.delete(`/products/${id}`),
 };
 
 export const stockApi = {
   getTransactions: (params) => api.get("/stock/transactions", { params }),
-  in:     (data) => api.post("/stock/in", data),
-  out:    (data) => api.post("/stock/out", data),
+  in: (data) => api.post("/stock/in", data),
+  out: (data) => api.post("/stock/out", data),
   adjust: (data) => api.post("/stock/adjust", data),
   getOverview: () => api.get("/stock/overview"),
 };
 
-
-// ==================== SUPPLIER API ====================
 export const suppliersApi = {
   getAll: (params) => api.get("/suppliers", { params }),
   getStats: () => api.get("/suppliers/stats"),
@@ -81,17 +80,21 @@ export const suppliersApi = {
   getRawMaterialCategories: () => api.get("/suppliers/categories/raw-materials"),
 };
 
-// ==================== RAW MATERIAL API ====================
 export const rawMaterialsApi = {
   getAll: (params) => api.get("/raw-materials", { params }),
+  getCategories: () => api.get("/raw-materials/categories"),
   getById: (id) => api.get(`/raw-materials/${id}`),
   create: (data) => api.post("/raw-materials", data),
   update: (id, data) => api.patch(`/raw-materials/${id}`, data),
   delete: (id) => api.delete(`/raw-materials/${id}`),
   updateStock: (id, data) => api.patch(`/raw-materials/${id}/stock`, data),
+  getByCategory: (categoryId) => api.get(`/raw-materials/by-category/${categoryId}`),
+  getBySupplier: (supplierId) => api.get(`/raw-materials/by-supplier/${supplierId}`),
+  createCategory: (data) => api.post("/raw-materials/categories", data),
+  updateCategory: (id, data) => api.patch(`/raw-materials/categories/${id}`, data),
+  deleteCategory: (id) => api.delete(`/raw-materials/categories/${id}`),
 };
 
-// ==================== PURCHASE ORDER API ====================
 export const purchaseOrdersApi = {
   getAll: (params) => api.get("/purchase-orders", { params }),
   getById: (id) => api.get(`/purchase-orders/${id}`),
@@ -101,7 +104,7 @@ export const purchaseOrdersApi = {
   addPayment: (id, data) => api.post(`/purchase-orders/${id}/payments`, data),
   getPayments: (id) => api.get(`/purchase-orders/${id}/payments`),
   receiveGoods: (id, data) => api.post(`/purchase-orders/${id}/receive`, data),
-   uploadInvoice: (id, formData) => api.post(`/purchase-orders/${id}/invoices`, formData, {
+  uploadInvoice: (id, formData) => api.post(`/purchase-orders/${id}/invoices`, formData, {
     headers: { "Content-Type": "multipart/form-data" }
   }),
   getInvoices: (id) => api.get(`/purchase-orders/${id}/invoices`),
@@ -109,32 +112,40 @@ export const purchaseOrdersApi = {
 };
 
 export const customersApi = {
-  getAll:  (params)   => api.get("/customers", { params }),
-  getById: (id)       => api.get(`/customers/${id}`),
-  create:  (data)     => api.post("/customers", data),
-  update:  (id, data) => api.patch(`/customers/${id}`, data),
-  remove:  (id)       => api.delete(`/customers/${id}`),
+  getAll: (params) => api.get("/customers", { params }),
+  getById: (id) => api.get(`/customers/${id}`),
+  create: (data) => api.post("/customers", data),
+  update: (id, data) => api.patch(`/customers/${id}`, data),
+  remove: (id) => api.delete(`/customers/${id}`),
   getCreditInfo: (id) => api.get(`/credit/customer/${id}`),
 };
 
+// ✅ FIXED: salesOrdersApi with proper params handling
 export const salesOrdersApi = {
-  getAll:       (params)     => api.get("/sales-orders", { params }),
-  getById:      (id)         => api.get(`/sales-orders/${id}`),
-  create:       (data)       => api.post("/sales-orders", data),
+  getAll: (params) => api.get("/sales-orders", { params }),
+  getById: (id) => api.get(`/sales-orders/${id}`),
+  create: (data) => api.post("/sales-orders", data),
   updateStatus: (id, status) => api.patch(`/sales-orders/${id}/status`, { status }),
-  remove:       (id)         => api.delete(`/sales-orders/${id}`),
-  getDashboardStats: ()      => api.get("/sales-orders/dashboard-stats"),
-  getRecentOrders:   ()      => api.get("/sales-orders/recent"),
-  getStaffOrders:    ()      => api.get("/sales-orders/staff"), // ✅ ADD THIS
+  remove: (id) => api.delete(`/sales-orders/${id}`),
+  getDashboardStats: (options) => {
+    console.log('📤 API CALL - getDashboardStats with options:', options);
+    // ✅ Ensure params are passed correctly
+     if (options && options.params) {
+      return api.get("/sales-orders/dashboard-stats", options);
+    }
+    return api.get("/sales-orders/dashboard-stats", { params: options || {} });
+  },
+  getRecentOrders: () => api.get("/sales-orders/recent"),
+  getStaffOrders: () => api.get("/sales-orders/staff"),
 };
 
 export const deliveriesApi = {
-  getAll:       (params)    => api.get("/deliveries", { params }),
-  getById:      (id)        => api.get(`/deliveries/${id}`),
-  create:       (data)      => api.post("/deliveries", data),
-  updateStatus: (id, data)  => api.patch(`/deliveries/${id}/status`, data),
-  getHistory:   (params)    => api.get("/deliveries/history", { params }),
-  getKanban:    ()          => api.get("/deliveries/kanban"), // ✅ ADD THIS
+  getAll: (params) => api.get("/deliveries", { params }),
+  getById: (id) => api.get(`/deliveries/${id}`),
+  create: (data) => api.post("/deliveries", data),
+  updateStatus: (id, data) => api.patch(`/deliveries/${id}/status`, data),
+  getHistory: (params) => api.get("/deliveries/history", { params }),
+  getKanban: () => api.get("/deliveries/kanban"),
 };
 
 export const notificationsApi = {
@@ -152,36 +163,31 @@ export const notificationsApi = {
 };
 
 export const analyticsApi = {
-  dashboard:     ()       => api.get("/analytics/dashboard"),
+  dashboard: () => api.get("/analytics/dashboard"),
   stockMovement: (params) => api.get("/analytics/stock-movement", { params }),
-  topProducts:   (params) => api.get("/analytics/top-products", { params }),
-  revenue:       (params) => api.get("/analytics/revenue", { params }),
-  demandForecast:(params) => api.get("/analytics/demand-forecast", { params }),
-  auditLogs:     (params) => api.get("/analytics/audit-logs", { params }),
+  topProducts: (params) => api.get("/analytics/top-products", { params }),
+  revenue: (params) => api.get("/analytics/revenue", { params }),
+  demandForecast: (params) => api.get("/analytics/demand-forecast", { params }),
+  auditLogs: (params) => api.get("/analytics/audit-logs", { params }),
 };
 
 export const paymentsApi = {
-  initiate:   (data)         => api.post("/payments/initiate", data),
-  verify:     (data)         => api.post("/payments/verify", data),
+  initiate: (data) => api.post("/payments/initiate", data),
+  verify: (data) => api.post("/payments/verify", data),
   getByOrder: (salesOrderId) => api.get(`/payments/order/${salesOrderId}`),
 };
 
-// Credit API
 export const creditApi = {
-  getAccounts: () => api.get("/credit/accounts"),
-  getTransactions: (params) => api.get("/credit/transactions", { params }),
+  getAccounts: (params) => api.get("/credit/accounts", { params }),
+  getLedger: (customerId) => api.get(`/credit/ledger/${customerId}`),
   getSummary: () => api.get("/credit/summary"),
-  getCustomerInfo: (id) => api.get(`/credit/customer/${id}`),
-  recordPayment: (data) => api.post("/credit/record-payment", data), // ✅ Make sure this exists
+  recordPayment: (data) => api.post("/credit/record-payment", data),
 };
 
 export const stockAdjustmentApi = {
-  // Staff endpoints
   getMyRequests: (params) => api.get("/stock-adjustments/my-requests", { params }),
   createRequest: (data) => api.post("/stock-adjustments/request", data),
   getRequestById: (id) => api.get(`/stock-adjustments/${id}`),
-  
-  // Manager endpoints
   getPending: () => api.get("/stock-adjustments/pending"),
   getAll: (params) => api.get("/stock-adjustments/all", { params }),
   getStats: () => api.get("/stock-adjustments/stats"),
@@ -189,16 +195,115 @@ export const stockAdjustmentApi = {
   reject: (id, data) => api.patch(`/stock-adjustments/${id}/reject`, data),
 };
 
-export const staffPerformanceApi = {
-  // Get leaderboard with optional month/year filter
-  getLeaderboard: (params) => api.get("/staff-performance/leaderboard", { params }),
-  
-  // Get performance stats overview
-  getStats: (params) => api.get("/staff-performance/stats", { params }),
-  
-  // Get detailed performance for a specific staff member
-  getStaffDetails: (staffId, params) => api.get(`/staff-performance/${staffId}`, { params }),
-  
-  // Update performance score manually
-  updateScore: (staffId, data) => api.patch(`/staff-performance/${staffId}/score`, data),
+export const productionApi = {
+  getAll: (params) => api.get("/production", { params }),
+  getById: (id) => api.get(`/production/${id}`),
+  getStats: () => api.get("/production/stats"),
+  create: (data) => api.post("/production", data),
+  delete: (id) => api.delete(`/production/${id}`),
+};
+
+
+export const reportsApi = {
+  getDashboard: (params) => {
+    const queryParams = new URLSearchParams();
+    
+    Object.keys(params).forEach(key => {
+      if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+        queryParams.append(key, params[key]);
+      }
+    });
+    
+    return api.get(`/reports/dashboard?${queryParams.toString()}`);
+  },
+  getRevenue: (params) => {
+    const queryParams = new URLSearchParams();
+    Object.keys(params).forEach(key => {
+      if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+        queryParams.append(key, params[key]);
+      }
+    });
+    return api.get(`/reports/revenue?${queryParams.toString()}`);
+  },
+  getTopProducts: (params) => {
+    const queryParams = new URLSearchParams();
+    Object.keys(params).forEach(key => {
+      if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+        queryParams.append(key, params[key]);
+      }
+    });
+    return api.get(`/reports/top-products?${queryParams.toString()}`);
+  },
+  getPaymentBreakdown: (params) => {
+    const queryParams = new URLSearchParams();
+    Object.keys(params).forEach(key => {
+      if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+        queryParams.append(key, params[key]);
+      }
+    });
+    return api.get(`/reports/payment-breakdown?${queryParams.toString()}`);
+  },
+  getCreditSummary: (params) => {
+    const queryParams = new URLSearchParams();
+    Object.keys(params).forEach(key => {
+      if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+        queryParams.append(key, params[key]);
+      }
+    });
+    return api.get(`/reports/credit-summary?${queryParams.toString()}`);
+  },
+  getInventory: (params) => {
+    const queryParams = new URLSearchParams();
+    Object.keys(params).forEach(key => {
+      if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+        queryParams.append(key, params[key]);
+      }
+    });
+    return api.get(`/reports/inventory?${queryParams.toString()}`);
+  },
+  exportReport: (params) => {
+    const queryParams = new URLSearchParams();
+    Object.keys(params).forEach(key => {
+      if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+        queryParams.append(key, params[key]);
+      }
+    });
+    return api.get(`/reports/export?${queryParams.toString()}`, { responseType: 'blob' });
+  },
+};
+
+export const profileApi = {
+  requestChange: (data) => api.post("/profile/request-change", data),
+  getMyRequests: (params) => api.get("/profile/my-requests", { params }),
+  getAllRequests: (params) => api.get("/profile/admin/requests", { params }),
+  approveRequest: (id, data) => api.patch(`/profile/admin/requests/${id}/approve`, data),
+  rejectRequest: (id, data) => api.patch(`/profile/admin/requests/${id}/reject`, data),
+};
+
+export const productCatalogApi = {
+  getAll: (params) => api.get("/product-catalog", { params }),
+  getStats: () => api.get("/product-catalog/stats"),
+  getCategories: () => api.get("/product-catalog/categories"),
+  create: (data) => api.post("/product-catalog", data),
+  update: (id, data, type) => api.patch(`/product-catalog/${id}?type=${type}`, data),
+  archive: (id, type) => api.patch(`/product-catalog/${id}/archive?type=${type}`),
+  restore: (id, type) => api.patch(`/product-catalog/${id}/restore?type=${type}`),
+  createProductCategory: (data) => api.post("/product-catalog/categories/product", data),
+  createRawMaterialCategory: (data) => api.post("/product-catalog/categories/raw-material", data),
+};
+
+export const stockDetailApi = {
+  getProduct: (id) => api.get(`/stock-detail/product/${id}`),
+  getRawMaterial: (id) => api.get(`/stock-detail/raw-material/${id}`),
+};
+
+export const auditLogsApi = {
+  getAll: (params) => api.get("/audit-logs", { params }),
+  getStats: () => api.get("/audit-logs/stats"),
+  getFilters: () => api.get("/audit-logs/filters"),
+  getById: (id) => api.get(`/audit-logs/${id}`),
+};
+
+export const dashboardApi = {
+  getStats: () => api.get("/dashboard/stats"),
 };

@@ -20,6 +20,7 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend
 } from "recharts";
+import { useNavigation } from "@/hooks/useNavigation.js";
 
 const STATUS_COLORS = {
   Active: "bg-green-100 text-green-700",
@@ -30,6 +31,7 @@ const STATUS_COLORS = {
 export default function SupplierDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { isAdmin, navigateTo, getBasePath } = useNavigation();
   const [supplier, setSupplier] = useState(null);
   const [insights, setInsights] = useState(null);
   const [purchaseOrders, setPurchaseOrders] = useState([]);
@@ -48,9 +50,17 @@ export default function SupplierDetail() {
       setPurchaseOrders(response.data.purchaseOrders || []);
     } catch (error) {
       toast.error("Failed to load supplier details");
-      navigate("/manager/suppliers");
+      handleNavigate("/suppliers");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleNavigate = (path) => {
+    if (isAdmin()) {
+      navigate(`/admin${path}`);
+    } else {
+      navigate(`/manager${path}`);
     }
   };
 
@@ -87,7 +97,7 @@ export default function SupplierDetail() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/manager/suppliers")}>
+          <Button variant="ghost" size="icon" onClick={() => handleNavigate("/suppliers")}>
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
@@ -103,10 +113,10 @@ export default function SupplierDetail() {
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => navigate(`/manager/suppliers/${id}/edit`)}>
+          <Button variant="outline" size="sm" onClick={() => handleNavigate(`/suppliers/${id}/edit`)}>
             <Edit className="h-4 w-4 mr-2" /> Edit Supplier
           </Button>
-          <Button size="sm" onClick={() => navigate(`/manager/purchase-orders/new?supplier=${id}`)}>
+          <Button size="sm" onClick={() => handleNavigate(`/purchase-orders/new?supplier=${id}`)}>
             <Plus className="h-4 w-4 mr-2" /> Create PO
           </Button>
         </div>
@@ -262,7 +272,7 @@ export default function SupplierDetail() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button size="sm" variant="ghost" onClick={() => navigate(`/manager/purchase-orders/${order.id}`)}>
+                            <Button size="sm" variant="ghost" onClick={() => handleNavigate(`/purchase-orders/${order.id}`)}>
                               View
                             </Button>
                           </TableCell>

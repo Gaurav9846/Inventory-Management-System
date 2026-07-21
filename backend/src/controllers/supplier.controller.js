@@ -1,6 +1,7 @@
 // src/controllers/supplier.controller.js
 import prisma from "../config/prisma.js";
 import { logAction } from "../utils/auditLog.js";
+import { createNotification } from "./notification.controller.js";
 
 // ==================== GET ALL SUPPLIERS ====================
 export const getAllSuppliers = async (req, res) => {
@@ -31,7 +32,7 @@ export const getAllSuppliers = async (req, res) => {
           purchaseOrders: {
             where: { status: { not: "CANCELLED" } },
             include: {
-              payments: {  // ✅ Include payments to calculate actual paid amount
+              payments: {
                 select: { amount: true }
               }
             },
@@ -45,10 +46,8 @@ export const getAllSuppliers = async (req, res) => {
     ]);
 
     const enhancedSuppliers = suppliers.map((supplier) => {
-      // Calculate total purchases (sum of all PO amounts)
       const totalPurchases = supplier.purchaseOrders.reduce((sum, po) => sum + (po.totalAmount || 0), 0);
       
-      // ✅ Calculate total paid by summing all payment amounts across all POs
       let totalPaid = 0;
       for (const po of supplier.purchaseOrders) {
         if (po.payments && po.payments.length > 0) {
@@ -56,21 +55,14 @@ export const getAllSuppliers = async (req, res) => {
         }
       }
       
-      // Calculate outstanding (total purchases - total paid)
       const outstandingPayments = totalPurchases - totalPaid;
-      
-      // Calculate completed orders
       const completedOrders = supplier.purchaseOrders.filter(po => po.status === "RECEIVED").length;
       
-      // Calculate on-time delivery rate
       const ordersWithDates = supplier.purchaseOrders.filter(po => po.expectedDeliveryDate && po.deliveredAt);
       const onTimeDeliveries = ordersWithDates.filter(po => new Date(po.deliveredAt) <= new Date(po.expectedDeliveryDate)).length;
       const onTimeRate = ordersWithDates.length > 0 ? (onTimeDeliveries / ordersWithDates.length) * 100 : 0;
       
-      // Get last order date
       const lastOrder = supplier.purchaseOrders.sort((a, b) => b.createdAt - a.createdAt)[0];
-      
-      // Calculate payment performance percentage
       const paymentPerformance = totalPurchases > 0 ? (totalPaid / totalPurchases) * 100 : 0;
       
       return {
@@ -84,19 +76,16 @@ export const getAllSuppliers = async (req, res) => {
         paymentTerms: supplier.paymentTerms || "Net 30",
         status: supplier.status,
         performanceRating: supplier.performanceRating,
-        // ✅ Financial fields (now correctly calculated from payments)
         totalPurchases,
         totalPaid,
         outstandingPayments,
         paymentPerformance: Math.round(paymentPerformance),
-        // Order statistics
         totalOrders: supplier._count.purchaseOrders,
         totalRawMaterials: supplier._count.rawMaterials,
         completedOrders,
         pendingOrders: supplier.purchaseOrders.filter(po => po.status === "PENDING" || po.status === "DRAFT").length,
         onTimeDeliveryRate: Math.round(onTimeRate),
         lastOrderDate: lastOrder?.createdAt,
-        // Bank details
         bankName: supplier.bankName,
         bankAccountNumber: supplier.bankAccountNumber,
         bankAccountName: supplier.bankAccountName,
@@ -121,8 +110,6 @@ export const getAllSuppliers = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
-// Add this to supplier.controller.js - for getting suppliers by raw material category
 
 // ==================== GET SUPPLIERS BY RAW MATERIAL CATEGORY ====================
 export const getSuppliersByCategory = async (req, res) => {
@@ -171,13 +158,9 @@ export const getRawMaterialCategories = async (req, res) => {
 // ==================== GET SUPPLIER STATS ====================
 export const getSupplierStats = async (req, res) => {
   try {
-    const [totalSuppliers, activeSuppliers, totalOutstanding, totalPurchasesAll, totalPaidAll] = await Promise.all([
+    const [totalSuppliers, activeSuppliers, totalPurchasesAll, totalPaidAll] = await Promise.all([
       prisma.supplier.count(),
       prisma.supplier.count({ where: { status: "Active" } }),
-      // Outstanding = total purchases - total paid across all suppliers
-      prisma.purchaseOrder.aggregate({
-        _sum: { totalAmount: true },
-      }),
       prisma.purchaseOrder.aggregate({
         _sum: { totalAmount: true },
       }),
@@ -237,7 +220,7 @@ export const getSupplierById = async (req, res) => {
               include: { rawMaterial: { select: { id: true, name: true, unit: true } } } 
             },
             createdBy: { select: { id: true, name: true } },
-            payments: {  // ✅ Include payments
+            payments: {
               include: { recordedBy: { select: { name: true } } },
               orderBy: { paymentDate: "desc" },
             },
@@ -251,7 +234,6 @@ export const getSupplierById = async (req, res) => {
       return res.status(404).json({ success: false, message: "Supplier not found" });
     }
     
-    // ✅ Calculate financial summary from actual payments
     let totalPurchases = 0;
     let totalPaid = 0;
     let totalOrders = 0;
@@ -263,21 +245,17 @@ export const getSupplierById = async (req, res) => {
       
       if (po.status === "RECEIVED") completedOrders++;
       
-      // ✅ Calculate paid amount from payments (not from PO paymentStatus)
       if (po.payments && po.payments.length > 0) {
         totalPaid += po.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
       }
     }
     
-    // ✅ Calculate outstanding
     const outstandingPayments = totalPurchases - totalPaid;
     
-    // Calculate on-time delivery rate
     const ordersWithDates = supplier.purchaseOrders.filter(po => po.expectedDeliveryDate && po.deliveredAt);
     const onTimeDeliveries = ordersWithDates.filter(po => new Date(po.deliveredAt) <= new Date(po.expectedDeliveryDate)).length;
     const onTimeRate = ordersWithDates.length > 0 ? (onTimeDeliveries / ordersWithDates.length) * 100 : 0;
     
-    // Monthly purchase trend with paid amounts
     const monthlyTrend = {};
     supplier.purchaseOrders.forEach(po => {
       const month = po.createdAt.toLocaleString('default', { month: 'short', year: 'numeric' });
@@ -287,7 +265,6 @@ export const getSupplierById = async (req, res) => {
       monthlyTrend[month].amount += po.totalAmount || 0;
       monthlyTrend[month].orders++;
       
-      // ✅ Calculate paid for this month from payments
       if (po.payments && po.payments.length > 0) {
         const monthPaid = po.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
         monthlyTrend[month].paid += monthPaid;
@@ -323,7 +300,7 @@ export const getSupplierById = async (req, res) => {
         completedOrders,
         pendingOrders: totalOrders - completedOrders,
         totalPurchases,
-        totalPaid,        // ✅ From actual payments
+        totalPaid,
         outstandingPayments,
         paymentPerformance: Math.round(paymentPerformance),
         onTimeDeliveryRate: Math.round(onTimeRate),
@@ -344,7 +321,6 @@ export const getSupplierById = async (req, res) => {
           unitPrice: item.unitPrice,
           totalPrice: (item.unitPrice || 0) * item.quantity,
         })),
-        // ✅ Include payments in response
         payments: po.payments.map(p => ({
           id: p.id,
           amount: p.amount,
@@ -393,7 +369,26 @@ export const createSupplier = async (req, res) => {
       },
     });
     
-    await logAction(req.user.id, "CREATE", "Supplier", supplier.id, { name, phone });
+    await logAction({
+      userId: req.user.id,
+      action: "CREATE",
+      entity: "Supplier",
+      entityId: supplier.id,
+      module: "Suppliers",
+      description: `Created supplier: ${supplier.name}`,
+      newValues: { name: supplier.name, phone: supplier.phone, email: supplier.email, productCategories: supplier.productCategories },
+      req,
+    });
+
+    await createNotification({
+      title: `🆕 New Supplier Added: ${supplier.name}`,
+      message: `Supplier "${supplier.name}" has been added. Phone: ${supplier.phone}. Email: ${supplier.email || 'N/A'}.`,
+      type: 'SYSTEM_WARNING',
+      priority: 'INFORMATION',
+      referenceId: supplier.id,
+      referenceType: 'Supplier',
+      actionUrl: `/suppliers/${supplier.id}`,
+    });
     
     res.status(201).json({ success: true, supplier });
   } catch (err) {
@@ -411,6 +406,16 @@ export const updateSupplier = async (req, res) => {
       productCategories, paymentTerms, status, performanceRating,
       bankName, bankAccountNumber, bankAccountName, bankBranch, notes,
     } = req.body;
+    
+    // Get old values
+    const oldSupplier = await prisma.supplier.findUnique({
+      where: { id },
+      select: { 
+        name: true, contactPerson: true, email: true, phone: true,
+        productCategories: true, paymentTerms: true, status: true,
+        performanceRating: true,
+      }
+    });
     
     const supplier = await prisma.supplier.update({
       where: { id },
@@ -432,7 +437,37 @@ export const updateSupplier = async (req, res) => {
       },
     });
     
-    await logAction(req.user.id, "UPDATE", "Supplier", supplier.id, req.body);
+    await logAction({
+      userId: req.user.id,
+      action: "UPDATE",
+      entity: "Supplier",
+      entityId: supplier.id,
+      module: "Suppliers",
+      description: `Updated supplier: ${supplier.name}`,
+      oldValues: { 
+        name: oldSupplier?.name, 
+        status: oldSupplier?.status,
+        paymentTerms: oldSupplier?.paymentTerms,
+        productCategories: oldSupplier?.productCategories,
+      },
+      newValues: { 
+        name: supplier.name, 
+        status: supplier.status,
+        paymentTerms: supplier.paymentTerms,
+        productCategories: supplier.productCategories,
+      },
+      req,
+    });
+
+    await createNotification({
+      title: `✏️ Supplier Updated: ${supplier.name}`,
+      message: `Supplier "${supplier.name}" details have been updated. Status: ${supplier.status}.`,
+      type: 'SYSTEM_WARNING',
+      priority: 'INFORMATION',
+      referenceId: supplier.id,
+      referenceType: 'Supplier',
+      actionUrl: `/suppliers/${supplier.id}`,
+    });
     
     res.json({ success: true, supplier });
   } catch (err) {
@@ -449,6 +484,15 @@ export const deleteSupplier = async (req, res) => {
   try {
     const { id } = req.params;
     
+    const supplier = await prisma.supplier.findUnique({
+      where: { id },
+      select: { name: true }
+    });
+    
+    if (!supplier) {
+      return res.status(404).json({ success: false, message: "Supplier not found" });
+    }
+    
     const hasOrders = await prisma.purchaseOrder.count({ where: { supplierId: id } });
     if (hasOrders > 0) {
       return res.status(400).json({ 
@@ -458,7 +502,25 @@ export const deleteSupplier = async (req, res) => {
     }
     
     await prisma.supplier.delete({ where: { id } });
-    await logAction(req.user.id, "DELETE", "Supplier", id);
+    
+    await logAction({
+      userId: req.user.id,
+      action: "DELETE",
+      entity: "Supplier",
+      entityId: id,
+      module: "Suppliers",
+      description: `Deleted supplier: ${supplier.name}`,
+      req,
+    });
+
+    await createNotification({
+      title: `🗑️ Supplier Deleted: ${supplier.name}`,
+      message: `Supplier "${supplier.name}" has been deleted from the system.`,
+      type: 'SYSTEM_WARNING',
+      priority: 'WARNING',
+      referenceId: id,
+      referenceType: 'Supplier',
+    });
     
     res.json({ success: true, message: "Supplier deleted successfully" });
   } catch (err) {

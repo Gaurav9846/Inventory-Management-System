@@ -1,11 +1,21 @@
 // src/controllers/salesOrder.controller.js
+
 import prisma from "../config/prisma.js";
 import { logAction } from "../utils/auditLog.js";
-import { generateOrderNumber } from "../utils/generateOrderNumber.js";
+import { generateSalesOrderNumber } from "../utils/counter.js";
+import { createSalesInvoiceFromOrder } from "./invoice.controller.js";
 
+// ============================================================
 // GET /api/sales-orders/dashboard-stats
+// ============================================================
 export const getDashboardStats = async (req, res) => {
   try {
+    const { timeFrame = "monthly" } = req.query;
+    
+    console.log(`\n📊 ========================================`);
+    console.log(`📊 DASHBOARD API CALLED WITH TIMEFRAME: ${timeFrame.toUpperCase()}`);
+    console.log(`📊 ========================================\n`);
+    
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -14,135 +24,389 @@ export const getDashboardStats = async (req, res) => {
     const currentUserId = req.user.id;
     const isStaff = req.user.role === "STAFF";
 
-    // 1. Today's Orders
+    // ============================================================
+    // 1. TODAY'S STATS
+    // ============================================================
     const todayOrders = await prisma.salesOrder.count({
       where: {
-        createdAt: {
-          gte: today,
-          lt: tomorrow,
-        },
+        createdAt: { gte: today, lt: tomorrow },
         ...(isStaff && { createdById: currentUserId }),
       },
     });
 
-    // 2. Today's Revenue (only DISPATCHED and COMPLETED)
-    const todayRevenueResult = await prisma.salesOrder.aggregate({
+    const todayRevenueResult = await prisma.payment.aggregate({
       where: {
-        createdAt: {
-          gte: today,
-          lt: tomorrow,
-        },
-        status: {
-          in: ["DISPATCHED", "COMPLETED"],
-        },
-        ...(isStaff && { createdById: currentUserId }),
+        createdAt: { gte: today, lt: tomorrow },
+        status: "COMPLETED",
+        ...(isStaff && { salesOrder: { createdById: currentUserId } }),
       },
-      _sum: {
-        totalAmount: true,
+      _sum: { amount: true },
+    });
+    const todayRevenue = todayRevenueResult._sum.amount || 0;
+
+    // ============================================================
+    // 2. TOTAL REVENUE (From COMPLETED payments only)
+    // ============================================================
+    const totalRevenueResult = await prisma.payment.aggregate({
+      where: {
+        status: "COMPLETED",
+        ...(isStaff && { salesOrder: { createdById: currentUserId } }),
       },
+      _sum: { amount: true },
+    });
+    const totalRevenue = totalRevenueResult._sum.amount || 0;
+
+    // ============================================================
+    // 3. TOTAL ORDERS
+    // ============================================================
+    const totalOrders = await prisma.salesOrder.count({
+      where: isStaff ? { createdById: currentUserId } : {},
     });
 
-    // 3. Pending Deliveries
-    const pendingDeliveries = await prisma.delivery.count({
-      where: {
-        status: {
-          in: ["PENDING", "IN_TRANSIT"],
-        },
-      },
-    });
-
-    // 4. Payment Breakdown for Today
+    // ============================================================
+    // 4. PAYMENT BREAKDOWN (ALL-TIME from COMPLETED payments)
+    // ============================================================
     const paymentBreakdown = await prisma.payment.groupBy({
       by: ["method"],
       where: {
-        createdAt: {
-          gte: today,
-          lt: tomorrow,
-        },
         status: "COMPLETED",
+        ...(isStaff && { salesOrder: { createdById: currentUserId } }),
       },
-      _sum: {
-        amount: true,
-      },
+      _sum: { amount: true },
     });
 
-    const paymentMap = {
-      CASH: 0,
-      ONLINE: 0,
-      CREDIT: 0,
-      PAY_LATER: 0,
-    };
-
-    paymentBreakdown.forEach(p => {
-      if (p.method === "CASH") paymentMap.CASH = p._sum.amount || 0;
-      else if (p.method === "ONLINE") paymentMap.ONLINE = p._sum.amount || 0;
-      else if (p.method === "CREDIT") paymentMap.CREDIT = p._sum.amount || 0;
-      else if (p.method === "PAY_LATER") paymentMap.PAY_LATER = p._sum.amount || 0;
+    const paymentMap = { CASH: 0, ONLINE: 0, CREDIT: 0, PAY_LATER: 0 };
+    paymentBreakdown.forEach((p) => {
+      const method = p.method?.toUpperCase();
+      if (paymentMap[method] !== undefined) {
+        paymentMap[method] = p._sum.amount || 0;
+      }
     });
 
-    // 5. Credit Sales Total
+    // ============================================================
+    // 5. CREDIT SALES OUTSTANDING
+    // ============================================================
     const creditSalesResult = await prisma.creditAccount.aggregate({
-      _sum: {
-        remainingBalance: true,
+      _sum: { remainingBalance: true },
+    });
+    const creditSales = creditSalesResult._sum.remainingBalance || 0;
+
+    // ============================================================
+    // 6. PENDING DELIVERIES
+    // ============================================================
+    const pendingDeliveries = await prisma.delivery.count({
+      where: { 
+        status: { in: ["PENDING", "IN_TRANSIT"] },
       },
     });
 
-    // 6. Weekly Trend (Last 7 days)
-    const weeklyTrend = [];
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      const nextDate = new Date(date);
-      nextDate.setDate(nextDate.getDate() + 1);
+    // ============================================================
+    // 7. LOW STOCK & OUT OF STOCK
+    // ============================================================
+    const lowStockProducts = await prisma.product.count({
+      where: {
+        currentStock: { lte: prisma.product.fields.reorderLevel },
+        isArchived: false,
+      },
+    });
 
-      const orders = await prisma.salesOrder.count({
-        where: {
-          createdAt: {
-            gte: date,
-            lt: nextDate,
-          },
-          ...(isStaff && { createdById: currentUserId }),
-        },
-      });
+    const lowStockRawMaterials = await prisma.rawMaterial.count({
+      where: {
+        currentStock: { lte: prisma.rawMaterial.fields.reorderLevel },
+        isArchived: false,
+      },
+    });
 
-      const revenueResult = await prisma.salesOrder.aggregate({
-        where: {
-          createdAt: {
-            gte: date,
-            lt: nextDate,
-          },
-          status: {
-            in: ["DISPATCHED", "COMPLETED"],
-          },
-          ...(isStaff && { createdById: currentUserId }),
-        },
-        _sum: {
-          totalAmount: true,
-        },
-      });
+    const totalLowStock = lowStockProducts + lowStockRawMaterials;
 
-      weeklyTrend.push({
-        date: date.toLocaleDateString("en-US", { weekday: "short" }),
-        orders,
-        revenue: revenueResult._sum.totalAmount || 0,
-      });
+    console.log(`📊 LOW STOCK BREAKDOWN:`);
+    console.log(`   - Products below reorder: ${lowStockProducts}`);
+    console.log(`   - Raw Materials below reorder: ${lowStockRawMaterials}`);
+    console.log(`   - TOTAL LOW STOCK: ${totalLowStock}`);
+
+    // ============================================================
+    // 8. INVENTORY VALUE
+    // ============================================================
+    const products = await prisma.product.findMany({
+      where: { isArchived: false },
+      select: { currentStock: true, costPrice: true },
+    });
+    
+    const inventoryValue = products.reduce(
+      (sum, p) => sum + (p.currentStock || 0) * (p.costPrice || 0),
+      0
+    );
+
+    // ============================================================
+    // 9. PENDING APPROVALS (Purchase Orders)
+    // ============================================================
+    const pendingApprovals = await prisma.purchaseOrder.count({
+      where: { status: "PENDING" },
+    });
+
+    // ============================================================
+    // 10. ACTIVE CUSTOMERS (Last 30 days)
+    // ============================================================
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+
+    const activeCustomers = await prisma.customer.count({
+      where: {
+        salesOrders: {
+          some: {
+            createdAt: { gte: thirtyDaysAgo },
+            status: { not: "CANCELLED" },
+            ...(isStaff && { createdById: currentUserId }),
+          },
+        },
+      },
+    });
+
+    const totalCustomers = await prisma.customer.count();
+
+    // ============================================================
+    // 11. TOTAL PRODUCTS, SUPPLIERS, STAFF
+    // ============================================================
+    const totalProducts = await prisma.product.count({ 
+      where: { isArchived: false } 
+    });
+    
+    const totalSuppliers = await prisma.supplier.count();
+    
+    const totalStaff = await prisma.user.count({ 
+      where: { 
+        role: { in: ["STAFF", "MANAGER"] },
+        isActive: true 
+      } 
+    });
+
+    // ============================================================
+    // 12. UNREAD ALERTS
+    // ============================================================
+    const unreadAlerts = await prisma.notification.count({
+      where: { isRead: false },
+    });
+
+    // ============================================================
+    // 13. TREND DATA
+    // ============================================================
+    console.log(`\n📈 GENERATING ${timeFrame.toUpperCase()} TREND DATA...\n`);
+    
+    let trendData = [];
+
+    if (timeFrame === "daily") {
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      for (let i = 0; i < 7; i++) {
+        const date = new Date(today);
+        date.setDate(today.getDate() - (6 - i));
+        date.setHours(0, 0, 0, 0);
+        const nextDate = new Date(date);
+        nextDate.setDate(nextDate.getDate() + 1);
+        
+        const orders = await prisma.salesOrder.count({
+          where: {
+            createdAt: { gte: date, lt: nextDate },
+            ...(isStaff && { createdById: currentUserId }),
+          },
+        });
+        
+        const revenueResult = await prisma.payment.aggregate({
+          where: {
+            createdAt: { gte: date, lt: nextDate },
+            status: "COMPLETED",
+            ...(isStaff && { salesOrder: { createdById: currentUserId } }),
+          },
+          _sum: { amount: true },
+        });
+        
+        const revenueAmount = revenueResult._sum.amount || 0;
+        
+        trendData.push({
+          month: days[date.getDay()],
+          revenue: revenueAmount,
+          orders: orders,
+          profit: Math.round(revenueAmount * 0.25),
+        });
+      }
+      
+    } else if (timeFrame === "weekly") {
+      for (let i = 0; i < 4; i++) {
+        const startDate = new Date(today);
+        startDate.setDate(today.getDate() - ((3 - i) * 7));
+        startDate.setHours(0, 0, 0, 0);
+        const endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+        endDate.setHours(23, 59, 59, 999);
+        
+        const orders = await prisma.salesOrder.count({
+          where: {
+            createdAt: { gte: startDate, lte: endDate },
+            ...(isStaff && { createdById: currentUserId }),
+          },
+        });
+        
+        const revenueResult = await prisma.payment.aggregate({
+          where: {
+            createdAt: { gte: startDate, lte: endDate },
+            status: "COMPLETED",
+            ...(isStaff && { salesOrder: { createdById: currentUserId } }),
+          },
+          _sum: { amount: true },
+        });
+        
+        const revenueAmount = revenueResult._sum.amount || 0;
+        
+        const weekStart = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const weekEnd = endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        
+        trendData.push({
+          month: `Week ${i + 1}`,
+          weekRange: `${weekStart} - ${weekEnd}`,
+          revenue: revenueAmount,
+          orders: orders,
+          profit: Math.round(revenueAmount * 0.25),
+        });
+      }
+      
+    } else {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const currentMonth = today.getMonth();
+      
+      for (let i = 0; i < 12; i++) {
+        const monthIndex = (currentMonth - 11 + i + 12) % 12;
+        const year = today.getFullYear() - (monthIndex > currentMonth ? 1 : 0);
+        
+        const startDate = new Date(year, monthIndex, 1);
+        const endDate = new Date(year, monthIndex + 1, 0);
+        
+        const orders = await prisma.salesOrder.count({
+          where: {
+            createdAt: { gte: startDate, lte: endDate },
+            ...(isStaff && { createdById: currentUserId }),
+          },
+        });
+        
+        const revenueResult = await prisma.payment.aggregate({
+          where: {
+            createdAt: { gte: startDate, lte: endDate },
+            status: "COMPLETED",
+            ...(isStaff && { salesOrder: { createdById: currentUserId } }),
+          },
+          _sum: { amount: true },
+        });
+        
+        const revenueAmount = revenueResult._sum.amount || 0;
+        
+        trendData.push({
+          month: months[monthIndex],
+          revenue: revenueAmount,
+          orders: orders,
+          profit: Math.round(revenueAmount * 0.25),
+        });
+      }
     }
 
-    res.json({
-      todayOrders,
-      todayRevenue: todayRevenueResult._sum.totalAmount || 0,
-      pendingDeliveries,
-      paymentBreakdown: paymentMap,
-      creditSales: creditSalesResult._sum.remainingBalance || 0,
-      weeklyTrend,
+    // ============================================================
+    // 14. RECENT ORDERS
+    // ============================================================
+    const recentOrders = await prisma.salesOrder.findMany({
+      take: 6,
+      orderBy: { createdAt: "desc" },
+      where: isStaff ? { createdById: currentUserId } : {},
+      include: {
+        customer: { select: { name: true } },
+        items: {
+          take: 1,
+          include: { product: { select: { name: true } } },
+        },
+        payment: { select: { method: true, status: true, amount: true } },
+      },
     });
+
+    const formattedOrders = recentOrders.map((order) => ({
+      id: order.id,
+      orderNumber: order.orderNumber,
+      customer: order.customer?.name || "Unknown",
+      product: order.items[0]?.product?.name || "N/A",
+      qty: order.items.reduce((sum, item) => sum + item.quantity, 0),
+      amount: order.totalAmount || 0,
+      payment: order.payment?.method || "N/A",
+      paymentStatus: order.payment?.status || "N/A",
+      status: order.status,
+      createdAt: order.createdAt,
+    }));
+
+    // ============================================================
+    // 15. CALCULATE GROWTH PERCENTAGES
+    // ============================================================
+    const lastMonth = trendData[trendData.length - 1];
+    const prevMonth = trendData[trendData.length - 2];
+    
+    const revenueGrowth = prevMonth?.revenue 
+      ? ((lastMonth?.revenue - prevMonth?.revenue) / prevMonth?.revenue) * 100 
+      : 0;
+    
+    const ordersGrowth = prevMonth?.orders 
+      ? ((lastMonth?.orders - prevMonth?.orders) / prevMonth?.orders) * 100 
+      : 0;
+
+    // ============================================================
+    // 16. FINAL RESPONSE
+    // ============================================================
+    console.log(`\n✅ ${timeFrame.toUpperCase()} RESPONSE SUMMARY:`);
+    console.log(`- Total Revenue: ${totalRevenue}`);
+    console.log(`- Total Orders: ${totalOrders}`);
+    console.log(`- Active Customers: ${activeCustomers}`);
+    console.log(`- Low Stock (Products): ${lowStockProducts}`);
+    console.log(`- Low Stock (Raw Materials): ${lowStockRawMaterials}`);
+    console.log(`- TOTAL LOW STOCK: ${totalLowStock}`);
+    console.log(`- Trend Data Points: ${trendData.length}`);
+    console.log(`\n📤 SENDING RESPONSE WITH ${trendData.length} ${timeFrame.toUpperCase()} DATA POINTS...\n`);
+
+    res.json({
+      success: true,
+      data: {
+        totalRevenue: totalRevenue,
+        todayRevenue: todayRevenue,
+        netProfit: totalRevenue * 0.25,
+        totalOrders: totalOrders,
+        activeCustomers: activeCustomers,
+        lowStockProducts: totalLowStock,
+        lowStockProductCount: lowStockProducts,
+        lowStockRawMaterialCount: lowStockRawMaterials,
+        inventoryValue: inventoryValue,
+        pendingApprovals: pendingApprovals,
+        revenueGrowth: Math.round(revenueGrowth * 10) / 10,
+        monthlyGrowth: prevMonth?.revenue 
+          ? Math.round(((lastMonth?.revenue - prevMonth?.revenue) / prevMonth?.revenue) * 100) 
+          : 0,
+        profitGrowth: 11,
+        ordersGrowth: Math.round(ordersGrowth * 10) / 10,
+        customersGrowth: 4.1,
+        totalProducts: totalProducts,
+        totalSuppliers: totalSuppliers,
+        totalStaff: totalStaff,
+        pendingDeliveries: pendingDeliveries,
+        creditSales: creditSales,
+        unreadAlerts: unreadAlerts,
+        monthlyTrend: trendData,
+        paymentBreakdown: paymentMap,
+        recentOrders: formattedOrders,
+      },
+    });
+
   } catch (err) {
-    console.error("Error in getDashboardStats:", err);
-    res.status(500).json({ message: err.message });
+    console.error("❌ Error in getDashboardStats:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
   }
 };
 
+// ============================================================
 // GET /api/sales-orders/recent
+// ============================================================
 export const getRecentOrders = async (req, res) => {
   try {
     const { limit = 10 } = req.query;
@@ -154,30 +418,17 @@ export const getRecentOrders = async (req, res) => {
       orderBy: { createdAt: "desc" },
       where: isStaff ? { createdById: currentUserId } : undefined,
       include: {
-        customer: {
-          select: {
-            id: true,
-            name: true,
-            phone: true,
-          },
-        },
+        customer: { select: { id: true, name: true, phone: true } },
         items: {
           take: 2,
-          include: {
-            product: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
+          include: { product: { select: { id: true, name: true } } },
         },
         payment: true,
         delivery: true,
       },
     });
 
-    const formattedOrders = orders.map(order => ({
+    const formattedOrders = orders.map((order) => ({
       orderId: order.orderNumber,
       customer: order.customer.name,
       phone: order.customer.phone,
@@ -185,6 +436,7 @@ export const getRecentOrders = async (req, res) => {
       qty: order.items.reduce((sum, item) => sum + item.quantity, 0),
       amount: order.totalAmount,
       payment: order.payment?.method || "N/A",
+      paymentPlatform: order.payment?.platform || null,
       status: order.status,
       deliveryStatus: order.delivery?.status || "PENDING",
       date: order.createdAt,
@@ -197,16 +449,38 @@ export const getRecentOrders = async (req, res) => {
   }
 };
 
-// GET /api/sales-orders - All orders
+// ============================================================
+// GET /api/sales-orders
+// ============================================================
 export const getAllSalesOrders = async (req, res) => {
   try {
-    const { status, customerId, search, page = 1, limit = 20 } = req.query;
-    const skip = (Number(page) - 1) * Number(limit);
+    const { 
+      status, 
+      customerId, 
+      search, 
+      page = 1, 
+      limit = 20,
+      paymentMethod,
+    } = req.query;
     
-    const where = {
-      ...(status && { status }),
-      ...(customerId && { customerId }),
-    };
+    const skip = (Number(page) - 1) * Number(limit);
+    const take = Number(limit);
+
+    let where = {};
+
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+
+    if (customerId) {
+      where.customerId = customerId;
+    }
+
+    if (paymentMethod && paymentMethod !== 'all') {
+      where.payment = {
+        method: paymentMethod,
+      };
+    }
 
     if (search) {
       where.OR = [
@@ -216,50 +490,131 @@ export const getAllSalesOrders = async (req, res) => {
       ];
     }
 
+    console.log(`📊 Fetching orders with filters:`, JSON.stringify(where, null, 2));
+    console.log(`📊 Page: ${page}, Limit: ${limit}, Skip: ${skip}`);
+
     const [orders, total] = await Promise.all([
       prisma.salesOrder.findMany({
         where,
         include: {
-          customer: { select: { id: true, name: true, phone: true, address: true } },
-          createdBy: { select: { id: true, name: true } },
-          items: { 
-            include: { 
-              product: { select: { id: true, name: true, unit: true, sellingPrice: true } } 
+          customer: { 
+            select: { 
+              id: true, 
+              name: true, 
+              phone: true, 
+              address: true,
+              deliveryAddress: true,
             } 
           },
-          delivery: { select: { status: true, deliveryDate: true, deliveredAt: true } },
-          payment: { select: { status: true, method: true, amount: true } },
+          createdBy: { 
+            select: { 
+              id: true, 
+              name: true,
+              email: true,
+            } 
+          },
+          items: {
+            include: {
+              product: { 
+                select: { 
+                  id: true, 
+                  name: true, 
+                  unit: true, 
+                  sellingPrice: true,
+                  currentStock: true,
+                } 
+              },
+            },
+          },
+          delivery: { 
+            select: { 
+              id: true,
+              status: true, 
+              deliveryDate: true, 
+              deliveredAt: true,
+              notes: true,
+            } 
+          },
+          payment: { 
+            select: { 
+              id: true,
+              status: true, 
+              method: true, 
+              platform: true, 
+              platformTransactionId: true, 
+              amount: true,
+              verifiedAt: true,
+            } 
+          },
+          salesInvoice: {
+            select: {
+              id: true,
+              invoiceNumber: true,
+              status: true,
+              totalAmount: true,
+            }
+          }
         },
         orderBy: { createdAt: "desc" },
-        take: Number(limit),
-        skip,
+        take: take,
+        skip: skip,
       }),
       prisma.salesOrder.count({ where }),
     ]);
 
-    res.json({ 
-      data: orders, 
-      total, 
-      page: Number(page), 
-      limit: Number(limit),
-      pages: Math.ceil(total / Number(limit))
+    console.log(`📊 Found ${orders.length} orders out of ${total} total`);
+    if (orders.length > 0) {
+      const oldest = orders[orders.length - 1];
+      const newest = orders[0];
+      console.log(`📊 Date range: ${oldest?.createdAt?.toISOString?.() || 'N/A'} to ${newest?.createdAt?.toISOString?.() || 'N/A'}`);
+    }
+
+    const paymentMethodStats = await prisma.payment.groupBy({
+      by: ["method"],
+      where: {
+        salesOrder: {
+          ...where,
+        },
+        status: "COMPLETED",
+      },
+      _sum: { amount: true },
+      _count: true,
     });
+
+    res.json({
+      success: true,
+      data: orders,
+      total: total,
+      page: Number(page),
+      limit: Number(limit),
+      pages: Math.ceil(total / Number(limit)),
+      paymentMethodStats: paymentMethodStats.map(p => ({
+        method: p.method,
+        totalAmount: p._sum.amount || 0,
+        count: p._count,
+      })),
+    });
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: err.message });
+    console.error("❌ Error in getAllSalesOrders:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
   }
 };
 
-// GET /api/sales-orders/staff - Staff only sees PENDING and PROCESSING
+// ============================================================
+// GET /api/sales-orders/staff
+// ============================================================
 export const getStaffOrders = async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
-    const where = {
-      status: {
-        in: ["PENDING", "PROCESSING"],
-      },
+    const where = { 
+      status: { in: ["PENDING", "PROCESSING"] },
+      createdById: req.user.id,
     };
 
     const [orders, total] = await Promise.all([
@@ -273,7 +628,14 @@ export const getStaffOrders = async (req, res) => {
             },
           },
           delivery: { select: { id: true, status: true } },
-          payment: { select: { method: true, status: true } },
+          payment: { select: { method: true, platform: true, status: true } },
+          salesInvoice: {
+            select: {
+              id: true,
+              invoiceNumber: true,
+              status: true,
+            }
+          }
         },
         orderBy: { createdAt: "desc" },
         take: Number(limit),
@@ -282,13 +644,22 @@ export const getStaffOrders = async (req, res) => {
       prisma.salesOrder.count({ where }),
     ]);
 
-    res.json({ data: orders, total, page: Number(page), limit: Number(limit) });
+    res.json({ 
+      data: orders, 
+      total, 
+      page: Number(page), 
+      limit: Number(limit),
+      pages: Math.ceil(total / Number(limit)),
+    });
   } catch (err) {
+    console.error("Error in getStaffOrders:", err);
     res.status(500).json({ message: err.message });
   }
 };
 
+// ============================================================
 // GET /api/sales-orders/:id
+// ============================================================
 export const getSalesOrderById = async (req, res) => {
   try {
     const order = await prisma.salesOrder.findUnique({
@@ -296,76 +667,95 @@ export const getSalesOrderById = async (req, res) => {
       include: {
         customer: true,
         createdBy: { select: { id: true, name: true } },
-        items: { include: { product: { select: { id: true, name: true, unit: true, sellingPrice: true } } } },
+        items: { 
+          include: { 
+            product: { 
+              select: { 
+                id: true, 
+                name: true, 
+                unit: true, 
+                sellingPrice: true,
+                currentStock: true,
+              } 
+            } 
+          } 
+        },
         delivery: true,
         payment: true,
+        salesInvoice: {
+          include: {
+            items: {
+              include: {
+                product: true,
+              }
+            }
+          }
+        }
       },
     });
     if (!order) return res.status(404).json({ message: "Sales order not found." });
     res.json(order);
   } catch (err) {
+    console.error("Error in getSalesOrderById:", err);
     res.status(500).json({ message: err.message });
   }
 };
 
-// POST /api/sales-orders - UPDATED to prevent duplicate customers
+// ============================================================
+// POST /api/sales-orders - CREATE WITH AUTO-INCREMENT & INVOICE
+// ============================================================
 export const createSalesOrder = async (req, res) => {
   try {
-    const { 
-      customerId, 
-      customerName, 
-      phoneNumber, 
-      address, 
-      deliveryAddress, 
-      customerType, 
-      notes, 
-      items, 
-      paymentType, 
-      deliveryRequired, 
-      paymentDetails 
+    const {
+      customerId,
+      customerName,
+      phoneNumber,
+      address,
+      deliveryAddress,
+      customerType,
+      notes,
+      items,
+      paymentType,
+      paymentPlatform,
+      platformTransactionId,
+      deliveryRequired,
+      paymentDetails,
+      creditDueDate,
+      createInvoice = true,
     } = req.body;
 
     if ((!customerId && !customerName) || !items?.length) {
       return res.status(400).json({ message: "Customer and at least one item are required." });
     }
 
-    // FIND OR CREATE CUSTOMER - Check by phone number first to prevent duplicates
+    // FIND OR CREATE CUSTOMER
     let customer;
-    
+
     if (customerId) {
-      // If customerId provided, use it
       customer = await prisma.customer.findUnique({ where: { id: customerId } });
       if (!customer) {
         return res.status(404).json({ message: "Customer not found with provided ID." });
       }
     } else {
-      // Check if customer already exists by phone number (primary) or name
       const existingCustomer = await prisma.customer.findFirst({
         where: {
-          OR: [
-            { phone: phoneNumber },
-            { name: customerName }
-          ]
-        }
+          OR: [{ phone: phoneNumber }, { name: customerName }],
+        },
       });
-      
+
       if (existingCustomer) {
-        // Use existing customer instead of creating new one
         customer = existingCustomer;
-        
-        // Update customer info if needed (new address, etc.)
         const updateData = {};
         if (address && !customer.address) updateData.address = address;
         if (deliveryAddress && !customer.deliveryAddress) updateData.deliveryAddress = deliveryAddress;
-        
+
         if (Object.keys(updateData).length > 0) {
           await prisma.customer.update({
             where: { id: customer.id },
-            data: updateData
+            data: updateData,
           });
         }
       } else {
-        // Create new customer only if doesn't exist
         customer = await prisma.customer.create({
           data: {
             name: customerName,
@@ -380,9 +770,16 @@ export const createSalesOrder = async (req, res) => {
 
     // Stock availability check
     for (const item of items) {
-      const product = await prisma.product.findUnique({ where: { id: item.productId } });
+      const product = await prisma.product.findFirst({
+        where: { 
+          id: item.productId,
+          isArchived: false
+        }
+      });
       if (!product) {
-        return res.status(404).json({ message: `Product ${item.productId} not found.` });
+        return res.status(404).json({ 
+          message: `Product not found or has been archived. Please refresh the product list.` 
+        });
       }
       if (product.currentStock < Number(item.quantity)) {
         return res.status(400).json({
@@ -394,21 +791,31 @@ export const createSalesOrder = async (req, res) => {
     // Calculate total amount
     let totalAmount = 0;
     for (const item of items) {
-      const product = await prisma.product.findUnique({ where: { id: item.productId } });
+      const product = await prisma.product.findFirst({
+        where: { id: item.productId, isArchived: false }
+      });
+      if (!product) {
+        return res.status(404).json({ 
+          message: `Product not found or archived. Please refresh and try again.` 
+        });
+      }
       totalAmount += (item.unitPrice || product.sellingPrice) * item.quantity;
     }
 
-    // Create sales order
+    // ✅ Generate order number using counter (auto-increment)
+    const orderNumber = await generateSalesOrderNumber();
+
+    // CREATE SALES ORDER
     const order = await prisma.salesOrder.create({
       data: {
-        orderNumber: generateOrderNumber("SO"),
+        orderNumber: orderNumber,
         customerId: customer.id,
         notes,
         totalAmount,
         createdById: req.user.id,
         status: "PENDING",
         items: {
-          create: items.map(item => ({
+          create: items.map((item) => ({
             productId: item.productId,
             quantity: Number(item.quantity),
             unitPrice: item.unitPrice || null,
@@ -419,39 +826,65 @@ export const createSalesOrder = async (req, res) => {
       include: { customer: true, items: { include: { product: true } } },
     });
 
-    // Handle payment based on type
-    if (paymentType === "CASH" || paymentType === "ONLINE") {
+    // ==================== HANDLE PAYMENT ====================
+    if (paymentType === "CASH") {
       await prisma.payment.create({
         data: {
           salesOrderId: order.id,
-          method: paymentType,
+          method: "CASH",
           amount: totalAmount,
           status: "COMPLETED",
           verifiedAt: new Date(),
-          khaltiTransactionId: paymentDetails?.transactionId || null,
+          platform: null,
+          platformTransactionId: null,
         },
       });
-    } else if (paymentType === "CREDIT") {
+    } 
+    else if (paymentType === "ONLINE") {
+      await prisma.payment.create({
+        data: {
+          salesOrderId: order.id,
+          method: "ONLINE",
+          platform: paymentPlatform || "OTHER",
+          platformTransactionId: platformTransactionId || null,
+          amount: totalAmount,
+          status: "COMPLETED",
+          verifiedAt: new Date(),
+        },
+      });
+    } 
+    else if (paymentType === "CREDIT") {
       await prisma.payment.create({
         data: {
           salesOrderId: order.id,
           method: "CREDIT",
           amount: totalAmount,
           status: "PENDING",
+          platform: null,
+          platformTransactionId: null,
         },
       });
 
-      let creditAccount = await prisma.creditAccount.findUnique({
+      let dueDate;
+      if (creditDueDate) {
+        dueDate = new Date(creditDueDate);
+      } else {
+        dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + 30);
+      }
+
+      const existingCreditAccount = await prisma.creditAccount.findUnique({
         where: { customerId: customer.id },
       });
 
-      if (creditAccount) {
+      if (existingCreditAccount) {
         await prisma.creditAccount.update({
           where: { customerId: customer.id },
           data: {
-            totalCredit: creditAccount.totalCredit + totalAmount,
-            remainingBalance: creditAccount.remainingBalance + totalAmount,
-            status: creditAccount.remainingBalance + totalAmount === 0 ? "PAID" : "PARTIAL",
+            totalCredit: existingCreditAccount.totalCredit + totalAmount,
+            remainingBalance: existingCreditAccount.remainingBalance + totalAmount,
+            dueDate: dueDate > existingCreditAccount.dueDate ? dueDate : existingCreditAccount.dueDate,
+            status: "PENDING",
           },
         });
       } else {
@@ -461,7 +894,7 @@ export const createSalesOrder = async (req, res) => {
             totalCredit: totalAmount,
             paidAmount: 0,
             remainingBalance: totalAmount,
-            dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+            dueDate: dueDate,
             status: "PENDING",
           },
         });
@@ -471,29 +904,97 @@ export const createSalesOrder = async (req, res) => {
         where: { id: customer.id },
         data: { outstandingCredit: { increment: totalAmount } },
       });
-    } else if (paymentType === "PAY_LATER") {
+    } 
+    else if (paymentType === "PAY_LATER") {
       await prisma.payment.create({
         data: {
           salesOrderId: order.id,
           method: "PAY_LATER",
           amount: totalAmount,
           status: "PENDING",
+          platform: null,
+          platformTransactionId: null,
         },
       });
     }
 
-    await logAction(req.user.id, "CREATE", "SalesOrder", order.id, { orderNumber: order.orderNumber });
-    res.status(201).json(order);
-    
+    // ✅ CREATE SALES INVOICE (Auto-increment)
+    let invoice = null;
+    if (createInvoice) {
+      try {
+        invoice = await createSalesInvoiceFromOrder(order.id, req.user.id);
+      } catch (invoiceError) {
+        console.error("Failed to create invoice:", invoiceError);
+        // Don't fail the order if invoice creation fails
+      }
+    }
+
+    // ENHANCED AUDIT LOG
+    await logAction({
+      userId: req.user.id,
+      action: "CREATE",
+      entity: "SalesOrder",
+      entityId: order.id,
+      module: "Orders",
+      description: `${req.user.name} created sales order ${order.orderNumber} for ${customer.name} (Amount: ${totalAmount})`,
+      newValues: {
+        orderNumber: order.orderNumber,
+        totalAmount: order.totalAmount,
+        paymentType: paymentType,
+        customerId: customer.id,
+      },
+      req,
+    });
+
+    // CREATE NOTIFICATION
+    try {
+      const { createNotification } = await import('./notification.controller.js');
+      
+      await createNotification({
+        title: `🛒 New Order: ${order.orderNumber}`,
+        message: `New sales order #${order.orderNumber} created for ${customer.name}. Amount: ${totalAmount.toLocaleString()}. Payment: ${paymentType || 'N/A'}.`,
+        type: 'NEW_ORDER',
+        priority: 'INFORMATION',
+        referenceId: order.id,
+        referenceType: 'SalesOrder',
+        actionUrl: `/orders/${order.id}`,
+      });
+    } catch (notificationError) {
+      console.error('Failed to create notification:', notificationError);
+    }
+
+    const orderWithPayment = await prisma.salesOrder.findUnique({
+      where: { id: order.id },
+      include: {
+        customer: true,
+        items: { include: { product: true } },
+        payment: true,
+        delivery: true,
+        salesInvoice: {
+          include: {
+            items: {
+              include: {
+                product: true,
+              }
+            }
+          }
+        },
+      },
+    });
+
+    res.status(201).json({
+      ...orderWithPayment,
+      invoice: invoice,
+    });
   } catch (err) {
-    console.error(err);
+    console.error("Error creating sales order:", err);
     res.status(500).json({ message: err.message });
   }
 };
 
+// ============================================================
 // PATCH /api/sales-orders/:id/status
-// Add this to your salesOrder.controller.js in the updateSalesOrderStatus function
-
+// ============================================================
 export const updateSalesOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
@@ -501,16 +1002,18 @@ export const updateSalesOrderStatus = async (req, res) => {
 
     if (!staffAllowed.includes(status)) {
       return res.status(403).json({
-        message: "Staff can only change status to PROCESSING or CANCELLED. Use delivery section for dispatch/complete.",
+        message:
+          "Staff can only change status to PROCESSING or CANCELLED. Use delivery section for dispatch/complete.",
       });
     }
 
     const existing = await prisma.salesOrder.findUnique({
       where: { id: req.params.id },
-      include: { 
-        items: { include: { product: true } }, 
+      include: {
+        items: { include: { product: true } },
         delivery: true,
         payment: true,
+        salesInvoice: true,
       },
     });
 
@@ -519,7 +1022,7 @@ export const updateSalesOrderStatus = async (req, res) => {
     let updatedOrder;
 
     if (status === "PROCESSING" && existing.status === "PENDING") {
-      const delivery = await prisma.delivery.create({
+      await prisma.delivery.create({
         data: {
           salesOrderId: existing.id,
           status: "PENDING",
@@ -531,22 +1034,54 @@ export const updateSalesOrderStatus = async (req, res) => {
         where: { id: req.params.id },
         data: { status: "PROCESSING" },
       });
-      
+
+      // Update invoice status to SENT
+      if (existing.salesInvoice) {
+        await prisma.salesInvoice.update({
+          where: { id: existing.salesInvoice.id },
+          data: { status: "SENT" },
+        });
+      }
+
+      await logAction({
+        userId: req.user.id,
+        action: "UPDATE_STATUS",
+        entity: "SalesOrder",
+        entityId: existing.id,
+        module: "Orders",
+        description: `${req.user.name} changed order ${existing.orderNumber} status from ${existing.status} to PROCESSING`,
+        oldValues: { status: existing.status },
+        newValues: { status: "PROCESSING" },
+        req,
+      });
+
+      try {
+        const { createNotification } = await import('./notification.controller.js');
+        await createNotification({
+          title: `📦 Order Processing: ${existing.orderNumber}`,
+          message: `Order #${existing.orderNumber} is now being processed.`,
+          type: 'ORDER_UPDATE',
+          priority: 'INFORMATION',
+          referenceId: existing.id,
+          referenceType: 'SalesOrder',
+          actionUrl: `/orders/${existing.id}`,
+        });
+      } catch (notificationError) {
+        console.error('Failed to create notification:', notificationError);
+      }
+
     } else if (status === "CANCELLED") {
-      // ✅ REVERSE CREDIT ACCOUNT IF ORDER WAS ON CREDIT
+      // Reverse credit if order was on credit
       if (existing.payment?.method === "CREDIT") {
-        // Find credit account for this customer
         const creditAccount = await prisma.creditAccount.findUnique({
           where: { customerId: existing.customerId },
         });
-        
+
         if (creditAccount) {
-          // Reverse the credit amount
           const newTotalCredit = creditAccount.totalCredit - existing.totalAmount;
           const newRemainingBalance = creditAccount.remainingBalance - existing.totalAmount;
-          
+
           if (newTotalCredit <= 0 || newRemainingBalance <= 0) {
-            // Delete credit account if fully reversed
             await prisma.creditPayment.deleteMany({
               where: { creditAccountId: creditAccount.id },
             });
@@ -558,7 +1093,6 @@ export const updateSalesOrderStatus = async (req, res) => {
               data: { outstandingCredit: 0 },
             });
           } else {
-            // Update credit account with reversed amount
             await prisma.creditAccount.update({
               where: { id: creditAccount.id },
               data: {
@@ -572,19 +1106,26 @@ export const updateSalesOrderStatus = async (req, res) => {
               data: { outstandingCredit: newRemainingBalance },
             });
           }
-          
-          // Update payment record to cancelled
+
           await prisma.payment.update({
             where: { salesOrderId: existing.id },
             data: { status: "CANCELLED" },
           });
         }
       }
-      
+
       updatedOrder = await prisma.salesOrder.update({
         where: { id: req.params.id },
         data: { status: "CANCELLED" },
       });
+
+      // Update invoice status to CANCELLED
+      if (existing.salesInvoice) {
+        await prisma.salesInvoice.update({
+          where: { id: existing.salesInvoice.id },
+          data: { status: "CANCELLED" },
+        });
+      }
 
       if (existing.delivery) {
         await prisma.delivery.update({
@@ -592,33 +1133,190 @@ export const updateSalesOrderStatus = async (req, res) => {
           data: { status: "RETURNED" },
         });
       }
+
+      await logAction({
+        userId: req.user.id,
+        action: "CANCEL",
+        entity: "SalesOrder",
+        entityId: existing.id,
+        module: "Orders",
+        description: `${req.user.name} cancelled order ${existing.orderNumber}`,
+        oldValues: { status: existing.status },
+        newValues: { status: "CANCELLED" },
+        req,
+      });
+
+      try {
+        const { createNotification } = await import('./notification.controller.js');
+        await createNotification({
+          title: `❌ Order Cancelled: ${existing.orderNumber}`,
+          message: `Order #${existing.orderNumber} has been cancelled.`,
+          type: 'ORDER_UPDATE',
+          priority: 'WARNING',
+          referenceId: existing.id,
+          referenceType: 'SalesOrder',
+          actionUrl: `/orders/${existing.id}`,
+        });
+      } catch (notificationError) {
+        console.error('Failed to create notification:', notificationError);
+      }
+
     } else {
       return res.status(400).json({ message: "Invalid status transition" });
     }
 
-    await logAction(req.user.id, "UPDATE_STATUS", "SalesOrder", updatedOrder.id, { status });
     res.json(updatedOrder);
-    
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: err.message });
   }
 };
 
+// ============================================================
 // DELETE /api/sales-orders/:id
+// ============================================================
 export const deleteSalesOrder = async (req, res) => {
   try {
-    const order = await prisma.salesOrder.findUnique({ where: { id: req.params.id } });
+    const order = await prisma.salesOrder.findUnique({ 
+      where: { id: req.params.id },
+      include: { salesInvoice: true }
+    });
     if (!order) return res.status(404).json({ message: "Sales order not found." });
     if (["DISPATCHED", "COMPLETED"].includes(order.status)) {
       return res.status(400).json({ message: "Cannot delete a dispatched or completed order." });
     }
 
+    // Delete associated invoice if exists
+    if (order.salesInvoice) {
+      await prisma.salesInvoice.delete({
+        where: { id: order.salesInvoice.id },
+      });
+    }
+
     await prisma.salesOrderItem.deleteMany({ where: { salesOrderId: req.params.id } });
     await prisma.salesOrder.delete({ where: { id: req.params.id } });
-    await logAction(req.user.id, "DELETE", "SalesOrder", req.params.id);
+
+    await logAction({
+      userId: req.user.id,
+      action: "DELETE",
+      entity: "SalesOrder",
+      entityId: req.params.id,
+      module: "Orders",
+      description: `${req.user.name} deleted order ${order.orderNumber}`,
+      oldValues: { orderNumber: order.orderNumber, totalAmount: order.totalAmount },
+      req,
+    });
+
     res.json({ message: "Sales order deleted." });
   } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// ============================================================
+// BULK ORDER STATUS UPDATE
+// ============================================================
+export const bulkUpdateOrderStatus = async (req, res) => {
+  try {
+    const { orderIds, status } = req.body;
+    
+    if (!orderIds || !orderIds.length) {
+      return res.status(400).json({ message: "Order IDs are required." });
+    }
+    
+    if (!status) {
+      return res.status(400).json({ message: "Status is required." });
+    }
+    
+    const validStatuses = ["PROCESSING", "CANCELLED"];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: "Invalid status. Only PROCESSING or CANCELLED allowed." });
+    }
+
+    const result = await prisma.salesOrder.updateMany({
+      where: {
+        id: { in: orderIds },
+        status: "PENDING",
+      },
+      data: { status },
+    });
+
+    await logAction({
+      userId: req.user.id,
+      action: "BULK_UPDATE_STATUS",
+      entity: "SalesOrder",
+      entityId: null,
+      module: "Orders",
+      description: `${req.user.name} bulk updated ${result.count} orders to ${status}`,
+      newValues: { status, count: result.count },
+      req,
+    });
+
+    try {
+      const { createNotification } = await import('./notification.controller.js');
+      await createNotification({
+        title: `📋 Bulk Order Update: ${result.count} orders ${status.toLowerCase()}`,
+        message: `${result.count} orders have been ${status.toLowerCase()} in bulk.`,
+        type: 'ORDER_UPDATE',
+        priority: 'INFORMATION',
+        referenceType: 'SalesOrder',
+      });
+    } catch (notificationError) {
+      console.error('Failed to create notification:', notificationError);
+    }
+
+    res.json({
+      success: true,
+      message: `${result.count} orders updated to ${status}`,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// ============================================================
+// GET ORDER STATISTICS BY PAYMENT METHOD
+// ============================================================
+export const getPaymentMethodStats = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    
+    const where = {};
+    if (startDate) {
+      where.createdAt = { gte: new Date(startDate) };
+    }
+    if (endDate) {
+      where.createdAt = { ...where.createdAt, lte: new Date(endDate) };
+    }
+
+    const stats = await prisma.payment.groupBy({
+      by: ["method"],
+      where: {
+        salesOrder: where,
+        status: "COMPLETED",
+      },
+      _sum: { amount: true },
+      _count: true,
+    });
+
+    const totalRevenue = stats.reduce((sum, p) => sum + (p._sum.amount || 0), 0);
+    const totalOrders = stats.reduce((sum, p) => sum + p._count, 0);
+
+    res.json({
+      stats: stats.map(p => ({
+        method: p.method,
+        totalAmount: p._sum.amount || 0,
+        count: p._count,
+        percentage: totalRevenue > 0 ? ((p._sum.amount || 0) / totalRevenue) * 100 : 0,
+      })),
+      summary: {
+        totalRevenue,
+        totalOrders,
+      },
+    });
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ message: err.message });
   }
 };

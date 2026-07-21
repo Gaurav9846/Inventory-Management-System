@@ -20,14 +20,23 @@ import analyticsRoutes     from "./src/routes/analytics.routes.js";
 import creditRoutes        from "./src/routes/credit.routes.js";
 import { connectDB }       from './src/config/db.js';
 import stockAdjustmentRoutes from "./src/routes/stockAdjustment.routes.js";
-import staffPerformanceRoutes from "./src/routes/staffPerformance.routes.js";
+import productionRoutes from "./src/routes/production.routes.js";
+import reportsRoutes from "./src/routes/reports.routes.js";
+import profileRoutes from "./src/routes/profile.routes.js";
+import productCatalogRoutes from "./src/routes/productCatalog.routes.js";
+import stockDetailRoutes from "./src/routes/stockDetail.routes.js";
+import auditLogRoutes from "./src/routes/auditLog.routes.js";
+import invoiceRoutes from "./src/routes/invoice.routes.js";
+
+// ✅ Import cron jobs
+import { startAllJobs } from "./src/jobs/cronjobs.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ─── Core Middleware ──────────────────────────────────────────────────────────
 app.use(cors({
-  origin:      process.env.CLIENT_URL || "http://localhost:5173",
+  origin: process.env.CLIENT_URL || "http://localhost:5173",
   credentials: true,
 }));
 app.use(express.json());
@@ -67,7 +76,13 @@ app.use("/api/notifications",    notificationRoutes);
 app.use("/api/analytics",        analyticsRoutes);
 app.use("/api/credit",           creditRoutes);
 app.use("/api/stock-adjustments", stockAdjustmentRoutes);
-app.use("/api/staff-performance", staffPerformanceRoutes);
+app.use("/api/production", productionRoutes);
+app.use("/api/reports", reportsRoutes);
+app.use("/api/profile", profileRoutes);
+app.use("/api/product-catalog", productCatalogRoutes);
+app.use("/api/stock-detail", stockDetailRoutes);
+app.use("/api/audit-logs", auditLogRoutes);
+app.use("/api/invoices", invoiceRoutes);
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((req, res) => {
@@ -83,8 +98,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-
-
 console.log('\n📋 Registered Routes:');
 console.log('  - /api/stock-adjustments/pending');
 console.log('  - /api/stock-adjustments/stats');
@@ -94,6 +107,9 @@ console.log('  - /api/stock-adjustments/request\n');
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 connectDB().then(() => {
+  // ✅ Start all cron jobs after database connection
+  startAllJobs();
+  
   app.listen(PORT, () => {
     console.log(`\n🚀  Fusion IMS Server running on http://localhost:${PORT}`);
     console.log(`📋  Environment: ${process.env.NODE_ENV || 'development'}`);

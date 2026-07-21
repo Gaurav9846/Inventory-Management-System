@@ -25,7 +25,8 @@ import {
   CheckCircle,
   XCircle,
   AlertCircle,
-  TrendingUp
+  TrendingUp,
+  DollarSign
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDate, formatCurrency } from "@/utils/helpers.js";
@@ -74,7 +75,6 @@ export default function StaffCustomers() {
     
     try {
       const response = await customersApi.getById(customer.id);
-      console.log("Customer details response:", response.data);
       
       setOrderHistory(response.data.orderHistory || []);
       setPaymentHistory(response.data.paymentHistory || []);
@@ -158,7 +158,7 @@ export default function StaffCustomers() {
             </div>
           </div>
 
-          {/* Customers Table - Added Total Paid Column */}
+          {/* Customers Table - Updated with Total Paid Column */}
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -217,7 +217,7 @@ export default function StaffCustomers() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {customer.address || '-'}
                       </td>
-                      {/* Total Paid Column */}
+                      {/* ✅ Total Paid Column */}
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="text-sm font-semibold text-green-600">
                           {formatCurrency(customer.totalPaid || 0)}

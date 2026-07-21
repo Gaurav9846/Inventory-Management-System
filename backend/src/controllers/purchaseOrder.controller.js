@@ -1,8 +1,9 @@
 // src/controllers/purchaseOrder.controller.js
+
 import prisma from "../config/prisma.js";
 import { logAction } from "../utils/auditLog.js";
-import { generateOrderNumber } from "../utils/generateOrderNumber.js";
-import { uploadBuffer, deleteImage } from "../config/cloudinary.js";
+import { generatePurchaseOrderNumber } from "../utils/counter.js";
+import { createPurchaseInvoiceFromOrder } from "./invoice.controller.js";
 
 // ==================== GET ALL PURCHASE ORDERS ====================
 export const getAllPurchaseOrders = async (req, res) => {
@@ -40,6 +41,14 @@ export const getAllPurchaseOrders = async (req, res) => {
             include: { rawMaterial: { select: { id: true, name: true, unit: true } } } 
           },
           payments: true,
+          purchaseInvoice: {
+            select: {
+              id: true,
+              invoiceNumber: true,
+              status: true,
+              totalAmount: true,
+            }
+          }
         },
         orderBy: { createdAt: "desc" },
         take: Number(limit),
@@ -48,7 +57,6 @@ export const getAllPurchaseOrders = async (req, res) => {
       prisma.purchaseOrder.count({ where }),
     ]);
     
-    // Calculate summary stats
     const stats = {
       total: await prisma.purchaseOrder.count(),
       pendingApproval: await prisma.purchaseOrder.count({ where: { status: "PENDING" } }),
@@ -105,6 +113,15 @@ export const getPurchaseOrderById = async (req, res) => {
           include: { uploadedBy: { select: { name: true } } },
           orderBy: { createdAt: "desc" },
         },
+        purchaseInvoice: {
+          include: {
+            items: {
+              include: {
+                rawMaterial: true,
+              }
+            }
+          }
+        }
       },
     });
     
@@ -125,13 +142,13 @@ export const createPurchaseOrder = async (req, res) => {
     const {
       supplierId, expectedDeliveryDate, warehouseDestination,
       items, notes, discount = 0, tax = 0,
+      createInvoice = true,
     } = req.body;
     
     if (!supplierId || !items?.length) {
       return res.status(400).json({ success: false, message: "Supplier and at least one item are required" });
     }
     
-    // Calculate totals
     let subtotal = 0;
     const processedItems = items.map(item => {
       const total = (item.unitPrice || 0) * item.quantity;
@@ -148,9 +165,17 @@ export const createPurchaseOrder = async (req, res) => {
     const taxAmount = (subtotal - discountAmount) * (Number(tax) || 0) / 100;
     const totalAmount = subtotal - discountAmount + taxAmount;
     
+    const supplier = await prisma.supplier.findUnique({
+      where: { id: supplierId },
+      select: { name: true }
+    });
+
+    // ✅ Generate order number using counter (auto-increment)
+    const orderNumber = await generatePurchaseOrderNumber();
+    
     const order = await prisma.purchaseOrder.create({
       data: {
-        orderNumber: generateOrderNumber("PO"),
+        orderNumber: orderNumber,
         supplierId,
         expectedDeliveryDate: expectedDeliveryDate ? new Date(expectedDeliveryDate) : null,
         warehouseDestination: warehouseDestination || null,
@@ -159,7 +184,7 @@ export const createPurchaseOrder = async (req, res) => {
         tax: Number(tax) || 0,
         subtotal,
         totalAmount,
-        status: "PENDING", // Needs admin approval
+        status: "PENDING",
         paymentStatus: "UNPAID",
         createdById: req.user.id,
         items: { create: processedItems },
@@ -169,17 +194,80 @@ export const createPurchaseOrder = async (req, res) => {
         items: { include: { rawMaterial: { select: { id: true, name: true } } } },
       },
     });
+
+    // ✅ CREATE PURCHASE INVOICE (Auto-increment)
+    let invoice = null;
+    if (createInvoice) {
+      try {
+        invoice = await createPurchaseInvoiceFromOrder(order.id, req.user.id);
+      } catch (invoiceError) {
+        console.error("Failed to create invoice:", invoiceError);
+        // Don't fail the order if invoice creation fails
+      }
+    }
+
+    // ENHANCED AUDIT LOG
+    await logAction({
+      userId: req.user.id,
+      action: "CREATE",
+      entity: "PurchaseOrder",
+      entityId: order.id,
+      module: "Purchase Orders",
+      description: `Created purchase order: ${order.orderNumber} for ${order.supplier.name}`,
+      newValues: {
+        orderNumber: order.orderNumber,
+        totalAmount: order.totalAmount,
+        supplierId: order.supplierId,
+        items: items.length,
+      },
+      req,
+    });
+
+    // CREATE NOTIFICATION
+    try {
+      const { createNotification } = await import('./notification.controller.js');
+      await createNotification({
+        title: `📋 New Purchase Order: ${order.orderNumber}`,
+        message: `Purchase Order #${order.orderNumber} created for supplier "${order.supplier.name}". Total: ₹${order.totalAmount.toLocaleString()}. Status: PENDING APPROVAL.`,
+        type: 'APPROVAL_REQUEST',
+        priority: 'WARNING',
+        referenceId: order.id,
+        referenceType: 'PurchaseOrder',
+        actionUrl: `/purchase-orders/${order.id}`,
+      });
+    } catch (notificationError) {
+      console.error('Failed to create notification:', notificationError);
+    }
+
+    const orderWithDetails = await prisma.purchaseOrder.findUnique({
+      where: { id: order.id },
+      include: {
+        supplier: true,
+        items: { include: { rawMaterial: { select: { id: true, name: true, unit: true } } } },
+        purchaseInvoice: {
+          include: {
+            items: {
+              include: {
+                rawMaterial: true,
+              }
+            }
+          }
+        }
+      },
+    });
     
-    await logAction(req.user.id, "CREATE", "PurchaseOrder", order.id, { orderNumber: order.orderNumber });
-    
-    res.status(201).json({ success: true, data: order });
+    res.status(201).json({
+      success: true,
+      data: orderWithDetails,
+      invoice: invoice,
+    });
   } catch (err) {
     console.error("Error in createPurchaseOrder:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-// ==================== UPDATE PURCHASE ORDER STATUS (Admin approval only) ====================
+// ==================== UPDATE PURCHASE ORDER STATUS ====================
 export const updatePurchaseOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -194,7 +282,11 @@ export const updatePurchaseOrderStatus = async (req, res) => {
     
     const order = await prisma.purchaseOrder.findUnique({
       where: { id },
-      include: { items: { include: { rawMaterial: true } } }
+      include: { 
+        items: { include: { rawMaterial: true } },
+        supplier: { select: { name: true } },
+        purchaseInvoice: true,
+      }
     });
     
     if (!order) {
@@ -220,6 +312,37 @@ export const updatePurchaseOrderStatus = async (req, res) => {
           approvedAt: new Date()
         }
       });
+
+      // Update invoice status to SENT
+      if (order.purchaseInvoice) {
+        await prisma.purchaseInvoice.update({
+          where: { id: order.purchaseInvoice.id },
+          data: { status: "SENT" },
+        });
+      }
+      
+      // ENHANCED AUDIT LOG
+      await logAction({
+        userId: req.user.id,
+        action: "APPROVE",
+        entity: "PurchaseOrder",
+        entityId: order.id,
+        module: "Purchase Orders",
+        description: `Approved purchase order: ${order.orderNumber}`,
+        oldValues: { status: order.status },
+        newValues: { status: "APPROVED" },
+        req,
+      });
+      
+      await createNotification({
+        title: `✅ Purchase Order Approved: ${order.orderNumber}`,
+        message: `Purchase Order #${order.orderNumber} has been APPROVED by ${req.user.name}. Supplier: ${order.supplier.name}. Total: ₹${order.totalAmount.toLocaleString()}.`,
+        type: 'APPROVAL_REQUEST',
+        priority: 'INFORMATION',
+        referenceId: order.id,
+        referenceType: 'PurchaseOrder',
+        actionUrl: `/purchase-orders/${order.id}`,
+      });
     }
     // MANAGER or ADMIN can cancel (if not received)
     else if (status === "CANCELLED") {
@@ -234,10 +357,40 @@ export const updatePurchaseOrderStatus = async (req, res) => {
           cancelledAt: new Date()
         }
       });
+
+      // Update invoice status to CANCELLED
+      if (order.purchaseInvoice) {
+        await prisma.purchaseInvoice.update({
+          where: { id: order.purchaseInvoice.id },
+          data: { status: "CANCELLED" },
+        });
+      }
+      
+      // ENHANCED AUDIT LOG
+      await logAction({
+        userId: req.user.id,
+        action: "REJECT",
+        entity: "PurchaseOrder",
+        entityId: order.id,
+        module: "Purchase Orders",
+        description: `Cancelled purchase order: ${order.orderNumber}`,
+        oldValues: { status: order.status },
+        newValues: { status: "CANCELLED" },
+        req,
+      });
+      
+      await createNotification({
+        title: `❌ Purchase Order Cancelled: ${order.orderNumber}`,
+        message: `Purchase Order #${order.orderNumber} has been CANCELLED by ${req.user.name}. Supplier: ${order.supplier.name}.`,
+        type: 'APPROVAL_REQUEST',
+        priority: 'WARNING',
+        referenceId: order.id,
+        referenceType: 'PurchaseOrder',
+        actionUrl: `/purchase-orders/${order.id}`,
+      });
     }
     
     if (updatedOrder) {
-      await logAction(req.user.id, "UPDATE_STATUS", "PurchaseOrder", updatedOrder.id, { status });
       res.json({ success: true, data: updatedOrder });
     } else {
       res.status(400).json({ success: false, message: "No changes made" });
@@ -260,14 +413,13 @@ export const addPayment = async (req, res) => {
     
     const order = await prisma.purchaseOrder.findUnique({ 
       where: { id },
-      include: { supplier: true }
+      include: { supplier: { select: { name: true } } }
     });
     
     if (!order) {
       return res.status(404).json({ success: false, message: "Purchase order not found" });
     }
     
-    // Calculate total paid so far
     const existingPayments = await prisma.purchaseOrderPayment.aggregate({
       where: { purchaseOrderId: id },
       _sum: { amount: true },
@@ -308,7 +460,28 @@ export const addPayment = async (req, res) => {
       data: { paymentStatus: newPaymentStatus },
     });
     
-    await logAction(req.user.id, "ADD_PAYMENT", "PurchaseOrder", id, { amount, paymentMethod });
+    // ENHANCED AUDIT LOG
+    await logAction({
+      userId: req.user.id,
+      action: "RECORD_PAYMENT",
+      entity: "PurchaseOrder",
+      entityId: id,
+      module: "Purchase Orders",
+      description: `Recorded payment of ${amount} for purchase order: ${order.orderNumber}`,
+      oldValues: { paymentStatus: order.paymentStatus },
+      newValues: { paymentStatus: newPaymentStatus },
+      req,
+    });
+
+    await createNotification({
+      title: `💰 Payment Recorded: ${order.orderNumber}`,
+      message: `Payment of ₹${amount.toLocaleString()} recorded for Purchase Order #${order.orderNumber}. Supplier: ${order.supplier.name}. Payment Status: ${newPaymentStatus}.`,
+      type: 'PAYMENT_RECEIVED',
+      priority: 'INFORMATION',
+      referenceId: order.id,
+      referenceType: 'PurchaseOrder',
+      actionUrl: `/purchase-orders/${order.id}`,
+    });
     
     res.status(201).json({ success: true, data: payment });
   } catch (err) {
@@ -317,7 +490,7 @@ export const addPayment = async (req, res) => {
   }
 };
 
-// ==================== RECEIVE GOODS (GRN) - AUTO STATUS UPDATE ====================
+// ==================== RECEIVE GOODS (GRN) ====================
 export const receiveGoods = async (req, res) => {
   try {
     const { id } = req.params;
@@ -327,7 +500,7 @@ export const receiveGoods = async (req, res) => {
       where: { id },
       include: {
         items: { include: { rawMaterial: true } },
-        supplier: true,
+        supplier: { select: { name: true } },
       },
     });
     
@@ -335,7 +508,6 @@ export const receiveGoods = async (req, res) => {
       return res.status(404).json({ success: false, message: "Purchase order not found" });
     }
     
-    // Check if order is approved before receiving
     if (order.status !== "APPROVED" && order.status !== "PARTIALLY_RECEIVED") {
       return res.status(400).json({ 
         success: false, 
@@ -343,7 +515,6 @@ export const receiveGoods = async (req, res) => {
       });
     }
     
-    // Create GRN
     const grn = await prisma.goodsReceivingNote.create({
       data: {
         grnNumber: `GRN-${Date.now()}`,
@@ -355,8 +526,8 @@ export const receiveGoods = async (req, res) => {
     
     let totalGoodReceived = 0;
     let totalDamaged = 0;
+    const receivedItems = [];
     
-    // Update each item with received quantities
     for (const receivedItem of items) {
       const orderItem = order.items.find(i => i.rawMaterialId === receivedItem.rawMaterialId);
       if (orderItem) {
@@ -364,6 +535,14 @@ export const receiveGoods = async (req, res) => {
         
         totalGoodReceived += goodQty;
         totalDamaged += receivedItem.damagedQty || 0;
+        
+        receivedItems.push({
+          name: orderItem.rawMaterial.name,
+          orderedQty: orderItem.quantity,
+          receivedQty: receivedItem.receivedQty,
+          damagedQty: receivedItem.damagedQty || 0,
+          acceptedQty: goodQty
+        });
         
         await prisma.purchaseOrderRawMaterial.update({
           where: { id: orderItem.id },
@@ -374,7 +553,6 @@ export const receiveGoods = async (req, res) => {
           },
         });
         
-        // Create GRN item
         await prisma.goodsReceivingRawMaterial.create({
           data: {
             grnId: grn.id,
@@ -388,7 +566,6 @@ export const receiveGoods = async (req, res) => {
           },
         });
         
-        // Update stock with good quantity only
         if (goodQty > 0) {
           const newStock = orderItem.rawMaterial.currentStock + goodQty;
           await prisma.$transaction([
@@ -412,7 +589,6 @@ export const receiveGoods = async (req, res) => {
       }
     }
     
-    // AUTO-DETERMINE STATUS BASED ON RECEIVED QUANTITIES
     const allItems = await prisma.purchaseOrderRawMaterial.findMany({
       where: { purchaseOrderId: id },
     });
@@ -436,7 +612,35 @@ export const receiveGoods = async (req, res) => {
       },
     });
     
-    await logAction(req.user.id, "RECEIVE_GOODS", "PurchaseOrder", id, { items, newStatus });
+    // ENHANCED AUDIT LOG
+    await logAction({
+      userId: req.user.id,
+      action: "RECEIVE_GOODS",
+      entity: "PurchaseOrder",
+      entityId: id,
+      module: "Purchase Orders",
+      description: `Received goods for purchase order: ${order.orderNumber}`,
+      newValues: {
+        status: newStatus,
+        totalGoodReceived,
+        totalDamaged,
+      },
+      req,
+    });
+
+    const statusMessage = allReceived ? "All items received. Order marked as RECEIVED." : 
+                          anyReceived ? "Partial receipt. Order marked as PARTIALLY RECEIVED." : 
+                          "No items received yet.";
+    
+    await createNotification({
+      title: `📦 Goods Received: ${order.orderNumber}`,
+      message: `Goods received for Purchase Order #${order.orderNumber}. Supplier: ${order.supplier.name}. Total items received: ${totalGoodReceived}. Damaged: ${totalDamaged}. Status: ${newStatus}.`,
+      type: 'STOCK_ADJUSTMENT',
+      priority: 'INFORMATION',
+      referenceId: order.id,
+      referenceType: 'PurchaseOrder',
+      actionUrl: `/purchase-orders/${order.id}`,
+    });
     
     res.json({
       success: true,
@@ -446,9 +650,8 @@ export const receiveGoods = async (req, res) => {
         totalGoodReceived, 
         totalDamaged, 
         status: newStatus,
-        statusMessage: allReceived ? "All items received. Order marked as RECEIVED." : 
-                      anyReceived ? "Partial receipt. Order marked as PARTIALLY RECEIVED." : 
-                      "No items received yet."
+        statusMessage,
+        receivedItems
       },
     });
   } catch (err) {
@@ -467,12 +670,14 @@ export const uploadInvoice = async (req, res) => {
       return res.status(400).json({ success: false, message: "No file uploaded" });
     }
     
-    const order = await prisma.purchaseOrder.findUnique({ where: { id } });
+    const order = await prisma.purchaseOrder.findUnique({ 
+      where: { id },
+      include: { supplier: { select: { name: true } } }
+    });
     if (!order) {
       return res.status(404).json({ success: false, message: "Purchase order not found" });
     }
     
-    // Upload to Cloudinary
     const result = await uploadBuffer(req.file.buffer, "ims/po-invoices");
     
     const invoice = await prisma.purchaseOrderInvoice.create({
@@ -490,7 +695,26 @@ export const uploadInvoice = async (req, res) => {
       },
     });
     
-    await logAction(req.user.id, "UPLOAD_INVOICE", "PurchaseOrder", id, { invoiceId: invoice.id });
+    await logAction({
+      userId: req.user.id,
+      action: "UPLOAD_INVOICE",
+      entity: "PurchaseOrder",
+      entityId: id,
+      module: "Purchase Orders",
+      description: `Uploaded invoice for purchase order: ${order.orderNumber}`,
+      newValues: { fileName: req.file.originalname, fileSize: req.file.size },
+      req,
+    });
+
+    await createNotification({
+      title: `📄 Invoice Uploaded: ${order.orderNumber}`,
+      message: `Invoice uploaded for Purchase Order #${order.orderNumber}. Supplier: ${order.supplier.name}. File: ${req.file.originalname}.`,
+      type: 'SYSTEM_WARNING',
+      priority: 'INFORMATION',
+      referenceId: order.id,
+      referenceType: 'PurchaseOrder',
+      actionUrl: `/purchase-orders/${order.id}`,
+    });
     
     res.status(201).json({ success: true, data: invoice });
   } catch (err) {
@@ -532,14 +756,21 @@ export const deleteInvoice = async (req, res) => {
       return res.status(404).json({ success: false, message: "Invoice not found" });
     }
     
-    // Delete from Cloudinary
     if (invoice.imagePublicId) {
       await deleteImage(invoice.imagePublicId);
     }
     
     await prisma.purchaseOrderInvoice.delete({ where: { id: invoiceId } });
     
-    await logAction(req.user.id, "DELETE_INVOICE", "PurchaseOrder", id, { invoiceId });
+    await logAction({
+      userId: req.user.id,
+      action: "DELETE_INVOICE",
+      entity: "PurchaseOrder",
+      entityId: id,
+      module: "Purchase Orders",
+      description: `Deleted invoice for purchase order`,
+      req,
+    });
     
     res.json({ success: true, message: "Invoice deleted successfully" });
   } catch (err) {
@@ -553,7 +784,13 @@ export const deletePurchaseOrder = async (req, res) => {
   try {
     const { id } = req.params;
     
-    const order = await prisma.purchaseOrder.findUnique({ where: { id } });
+    const order = await prisma.purchaseOrder.findUnique({ 
+      where: { id },
+      include: { 
+        supplier: { select: { name: true } },
+        purchaseInvoice: true,
+      }
+    });
     if (!order) {
       return res.status(404).json({ success: false, message: "Purchase order not found" });
     }
@@ -561,11 +798,36 @@ export const deletePurchaseOrder = async (req, res) => {
     if (order.status === "RECEIVED") {
       return res.status(400).json({ success: false, message: "Cannot delete a received purchase order" });
     }
+
+    // Delete associated invoice if exists
+    if (order.purchaseInvoice) {
+      await prisma.purchaseInvoice.delete({
+        where: { id: order.purchaseInvoice.id },
+      });
+    }
     
     await prisma.purchaseOrderRawMaterial.deleteMany({ where: { purchaseOrderId: id } });
     await prisma.purchaseOrder.delete({ where: { id } });
     
-    await logAction(req.user.id, "DELETE", "PurchaseOrder", id);
+    await logAction({
+      userId: req.user.id,
+      action: "DELETE",
+      entity: "PurchaseOrder",
+      entityId: id,
+      module: "Purchase Orders",
+      description: `Deleted purchase order: ${order.orderNumber}`,
+      oldValues: { orderNumber: order.orderNumber, totalAmount: order.totalAmount },
+      req,
+    });
+
+    await createNotification({
+      title: `🗑️ Purchase Order Deleted: ${order.orderNumber}`,
+      message: `Purchase Order #${order.orderNumber} has been deleted. Supplier: ${order.supplier.name}.`,
+      type: 'SYSTEM_WARNING',
+      priority: 'WARNING',
+      referenceId: id,
+      referenceType: 'PurchaseOrder',
+    });
     
     res.json({ success: true, message: "Purchase order deleted successfully" });
   } catch (err) {
@@ -583,7 +845,8 @@ export const autoCancelPendingOrders = async () => {
     where: {
       status: "PENDING",
       createdAt: { lt: sevenDaysAgo }
-    }
+    },
+    include: { supplier: { select: { name: true } } }
   });
   
   for (const order of pendingOrders) {
@@ -595,6 +858,15 @@ export const autoCancelPendingOrders = async () => {
       }
     });
     console.log(`[AUTO-CANCEL] PO ${order.orderNumber} cancelled due to 7 days pending`);
+    
+    await createNotification({
+      title: `⏰ Auto-Cancelled: ${order.orderNumber}`,
+      message: `Purchase Order #${order.orderNumber} has been auto-cancelled due to 7 days of inactivity. Supplier: ${order.supplier.name}.`,
+      type: 'SYSTEM_WARNING',
+      priority: 'WARNING',
+      referenceId: order.id,
+      referenceType: 'PurchaseOrder',
+    });
   }
   
   return pendingOrders.length;

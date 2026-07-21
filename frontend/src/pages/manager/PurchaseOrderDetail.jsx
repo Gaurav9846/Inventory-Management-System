@@ -1,4 +1,5 @@
 // src/pages/manager/PurchaseOrderDetail.jsx
+
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { purchaseOrdersApi } from "@/api/index.js";
@@ -27,10 +28,12 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner.jsx";
 import {
   ArrowLeft, CheckCircle, XCircle, Truck, Package, DollarSign,
   Building2, Phone, Mail, MapPin, FileText, Plus, AlertCircle,
-  Clock, RefreshCw, Printer, Upload, Eye, Trash2, ImageIcon
+  Clock, RefreshCw, Printer, Upload, Eye, Trash2, ImageIcon,
+  Receipt,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency, formatDate } from "@/utils/helpers.js";
+import { useNavigation } from "@/hooks/useNavigation.js";
 
 const STATUS_OPTIONS = [
   { value: "PENDING", label: "Pending Approval", color: "bg-yellow-100 text-yellow-700", icon: Clock },
@@ -44,8 +47,9 @@ export default function PurchaseOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const isAdmin = user?.role === "ADMIN";
-  const isManager = user?.role === "MANAGER";
+  const { isAdmin, isManager, navigateTo, getBasePath } = useNavigation();
+  const isAdminUser = user?.role === "ADMIN";
+  const isManagerUser = user?.role === "MANAGER";
 
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -73,6 +77,14 @@ export default function PurchaseOrderDetail() {
     fetchInvoices();
   }, [id]);
 
+  const handleNavigate = (path) => {
+    if (isAdmin()) {
+      navigate(`/admin${path}`);
+    } else {
+      navigate(`/manager${path}`);
+    }
+  };
+
   const fetchOrderDetails = async () => {
     setLoading(true);
     try {
@@ -99,7 +111,7 @@ export default function PurchaseOrderDetail() {
     } catch (error) {
       console.error("Error fetching order details:", error);
       toast.error("Failed to load purchase order details");
-      navigate("/manager/purchase-orders");
+      handleNavigate("/purchase-orders");
     } finally {
       setLoading(false);
     }
@@ -266,11 +278,15 @@ export default function PurchaseOrderDetail() {
     }
   };
 
+  // ==================== UPDATED PRINT PO FUNCTION ====================
   const handlePrintPO = () => {
     if (!order) {
       toast.error("No order data to print");
       return;
     }
+
+    // Get invoice number from the order's purchase invoice
+    const invoiceNumber = order.purchaseInvoice?.invoiceNumber || order.invoiceNumber || null;
 
     const printFrame = document.createElement("iframe");
     printFrame.style.position = "absolute";
@@ -298,12 +314,15 @@ export default function PurchaseOrderDetail() {
           .po-container { max-width: 800px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
           .header { background: #10b981; color: white; padding: 30px; text-align: center; }
           .header h1 { font-size: 28px; margin-bottom: 8px; }
+          .header .invoice-number { font-size: 14px; color: #d1fae5; margin-top: 4px; }
           .company-info { text-align: center; padding: 20px; border-bottom: 1px solid #e5e7eb; background: #f9fafb; }
           .content { padding: 30px; }
           .info-section { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px; }
           .info-box { background: #f9fafb; padding: 15px; border-radius: 8px; }
           .info-box h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
           .info-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
+          .info-row .label { color: #6b7280; }
+          .info-row .value { font-weight: 500; color: #1f2937; }
           table { width: 100%; border-collapse: collapse; margin: 20px 0; }
           th, td { border: 1px solid #e5e7eb; padding: 12px; text-align: left; }
           th { background: #f3f4f6; font-weight: 600; }
@@ -322,47 +341,101 @@ export default function PurchaseOrderDetail() {
       </head>
       <body>
         <div class="po-container">
-          <div class="header"><h1>PURCHASE ORDER</h1><p>Official Purchase Order Document</p></div>
-          <div class="company-info"><h2>Fusion Water Industries</h2><p>Industrial Area, Pokhara, Nepal | Tel: +977 61-123456</p></div>
+          <div class="header">
+            <h1>PURCHASE ORDER</h1>
+            <p>Official Purchase Order Document</p>
+            ${invoiceNumber ? `<p class="invoice-number">🧾 Invoice #${invoiceNumber}</p>` : ''}
+          </div>
+          <div class="company-info">
+            <h2>Fusion Water Industries</h2>
+            <p>Industrial Area, Pokhara, Nepal | Tel: +977 61-123456</p>
+          </div>
           <div class="content">
             <div class="info-section">
               <div class="info-box">
                 <h3>PO DETAILS</h3>
-                <div class="info-row"><span>PO Number:</span><span>${order.orderNumber}</span></div>
-                <div class="info-row"><span>PO Date:</span><span>${formatDate(order.createdAt)}</span></div>
-                <div class="info-row"><span>Expected Delivery:</span><span>${order.expectedDeliveryDate ? formatDate(order.expectedDeliveryDate) : "Not specified"}</span></div>
-                <div class="info-row"><span>Status:</span><span class="status-badge status-${order.status}">${order.status}</span></div>
+                <div class="info-row"><span class="label">PO Number:</span><span class="value">${order.orderNumber}</span></div>
+                <div class="info-row"><span class="label">PO Date:</span><span class="value">${formatDate(order.createdAt)}</span></div>
+                ${invoiceNumber ? `<div class="info-row"><span class="label">Invoice Number:</span><span class="value">${invoiceNumber}</span></div>` : ''}
+                <div class="info-row"><span class="label">Expected Delivery:</span><span class="value">${order.expectedDeliveryDate ? formatDate(order.expectedDeliveryDate) : "Not specified"}</span></div>
+                <div class="info-row"><span class="label">Status:</span><span class="status-badge status-${order.status}">${order.status}</span></div>
               </div>
               <div class="info-box">
                 <h3>SUPPLIER DETAILS</h3>
-                <div class="info-row"><span>Company:</span><span>${order.supplier?.name}</span></div>
-                <div class="info-row"><span>Contact:</span><span>${order.supplier?.contactPerson || "N/A"}</span></div>
-                <div class="info-row"><span>Phone:</span><span>${order.supplier?.phone}</span></div>
-                <div class="info-row"><span>Email:</span><span>${order.supplier?.email || "N/A"}</span></div>
+                <div class="info-row"><span class="label">Company:</span><span class="value">${order.supplier?.name}</span></div>
+                <div class="info-row"><span class="label">Contact:</span><span class="value">${order.supplier?.contactPerson || "N/A"}</span></div>
+                <div class="info-row"><span class="label">Phone:</span><span class="value">${order.supplier?.phone}</span></div>
+                <div class="info-row"><span class="label">Email:</span><span class="value">${order.supplier?.email || "N/A"}</span></div>
               </div>
             </div>
             <h3 style="margin-bottom: 10px;">Order Items</h3>
             <table>
-              <thead><tr><th>S.No.</th><th>Item Description</th><th class="text-right">Quantity</th><th class="text-right">Unit Price</th><th class="text-right">Total</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>S.No.</th>
+                  <th>Item Description</th>
+                  <th class="text-right">Quantity</th>
+                  <th class="text-right">Unit Price</th>
+                  <th class="text-right">Total</th>
+                </tr>
+              </thead>
               <tbody>
                 ${order.items?.map((item, idx) => `
-                  <tr><td>${idx + 1}</td><td>${item.rawMaterial?.name || "N/A"}</td><td class="text-right">${item.quantity} ${item.rawMaterial?.unit || ""}</td><td class="text-right">${formatCurrency(item.unitPrice)}</td><td class="text-right">${formatCurrency((item.unitPrice || 0) * item.quantity)}</td></tr>
+                  <tr>
+                    <td>${idx + 1}</td>
+                    <td>${item.rawMaterial?.name || "N/A"}</td>
+                    <td class="text-right">${item.quantity} ${item.rawMaterial?.unit || ""}</td>
+                    <td class="text-right">${formatCurrency(item.unitPrice)}</td>
+                    <td class="text-right">${formatCurrency((item.unitPrice || 0) * item.quantity)}</td>
+                  </tr>
                 `).join("")}
               </tbody>
               <tfoot>
-                <tr><td colspan="4" class="text-right"><strong>Subtotal:</strong></td><td class="text-right">${formatCurrency(order.subtotal)}</td></tr>
-                ${order.discount > 0 ? `<tr><td colspan="4" class="text-right"><strong>Discount (${order.discount}%):</strong></td><td class="text-right">-${formatCurrency(((order.subtotal || 0) * (order.discount || 0)) / 100)}</td></tr>` : ""}
-                ${order.tax > 0 ? `<tr><td colspan="4" class="text-right"><strong>Tax (${order.tax}%):</strong></td><td class="text-right">+${formatCurrency((((order.subtotal || 0) - ((order.subtotal || 0) * (order.discount || 0)) / 100) * (order.tax || 0)) / 100)}</td></tr>` : ""}
-                <tr style="border-top: 2px solid #000;"><td colspan="4" class="text-right"><strong>Grand Total:</strong></td><td class="text-right"><strong>${formatCurrency(order.totalAmount)}</strong></td></tr>
+                <tr>
+                  <td colspan="4" class="text-right"><strong>Subtotal:</strong></td>
+                  <td class="text-right">${formatCurrency(order.subtotal)}</td>
+                </tr>
+                ${order.discount > 0 ? `
+                  <tr>
+                    <td colspan="4" class="text-right"><strong>Discount (${order.discount}%):</strong></td>
+                    <td class="text-right">-${formatCurrency(((order.subtotal || 0) * (order.discount || 0)) / 100)}</td>
+                  </tr>
+                ` : ""}
+                ${order.tax > 0 ? `
+                  <tr>
+                    <td colspan="4" class="text-right"><strong>Tax (${order.tax}%):</strong></td>
+                    <td class="text-right">+${formatCurrency((((order.subtotal || 0) - ((order.subtotal || 0) * (order.discount || 0)) / 100) * (order.tax || 0)) / 100)}</td>
+                  </tr>
+                ` : ""}
+                <tr style="border-top: 2px solid #000;">
+                  <td colspan="4" class="text-right"><strong>Grand Total:</strong></td>
+                  <td class="text-right"><strong>${formatCurrency(order.totalAmount)}</strong></td>
+                </tr>
               </tfoot>
             </table>
-            ${order.notes ? `<div class="info-box" style="margin-top: 20px;"><h3>Notes / Instructions</h3><p>${order.notes}</p></div>` : ""}
+            ${order.notes ? `
+              <div class="info-box" style="margin-top: 20px;">
+                <h3>Notes / Instructions</h3>
+                <p>${order.notes}</p>
+              </div>
+            ` : ""}
             <div class="signature-section">
-              <div><p>_________________________</p><p><strong>Authorized Signature</strong></p><p>Fusion Water Industries</p></div>
-              <div><p>_________________________</p><p><strong>Supplier Signature</strong></p><p>Date: _____________</p></div>
+              <div>
+                <p>_________________________</p>
+                <p><strong>Authorized Signature</strong></p>
+                <p>Fusion Water Industries</p>
+              </div>
+              <div>
+                <p>_________________________</p>
+                <p><strong>Supplier Signature</strong></p>
+                <p>Date: _____________</p>
+              </div>
             </div>
           </div>
-          <div class="footer"><p>This is a computer-generated document. No signature is required for digital processing.</p></div>
+          <div class="footer">
+            <p>This is a computer-generated document. No signature is required for digital processing.</p>
+            ${invoiceNumber ? `<p style="margin-top: 4px; font-size: 10px;">Invoice #${invoiceNumber}</p>` : ''}
+          </div>
         </div>
         <script>window.onload = function() { window.print(); };</script>
       </body>
@@ -397,10 +470,10 @@ export default function PurchaseOrderDetail() {
     return (order?.totalAmount || 0) - calculateTotalPaid();
   };
 
-  const canApprove = isAdmin && order?.status === "PENDING";
-  const canCancel = (isAdmin || isManager) && order?.status !== "RECEIVED" && order?.status !== "CANCELLED";
-  const canReceive = (isAdmin || isManager) && (order?.status === "APPROVED" || order?.status === "PARTIALLY_RECEIVED");
-  const canAddPayment = (isAdmin || isManager) && order?.paymentStatus !== "PAID" && order?.status !== "CANCELLED";
+  const canApprove = isAdminUser && order?.status === "PENDING";
+  const canCancel = (isAdminUser || isManagerUser) && order?.status !== "RECEIVED" && order?.status !== "CANCELLED";
+  const canReceive = (isAdminUser || isManagerUser) && (order?.status === "APPROVED" || order?.status === "PARTIALLY_RECEIVED");
+  const canAddPayment = (isAdminUser || isManagerUser) && order?.paymentStatus !== "PAID" && order?.status !== "CANCELLED";
 
   if (loading) return <LoadingSpinner />;
   if (!order) return null;
@@ -410,13 +483,19 @@ export default function PurchaseOrderDetail() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/manager/purchase-orders")}>
+          <Button variant="ghost" size="icon" onClick={() => handleNavigate("/purchase-orders")}>
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-2xl font-bold text-gray-900">{order.orderNumber}</h1>
               {getStatusBadge(order.status)}
+              {order.purchaseInvoice?.invoiceNumber && (
+                <Badge className="bg-blue-100 text-blue-700">
+                  <Receipt className="h-3 w-3 mr-1" />
+                  Inv: {order.purchaseInvoice.invoiceNumber}
+                </Badge>
+              )}
             </div>
             <p className="text-sm text-gray-500 mt-1">
               Created on {formatDate(order.createdAt)} by {order.createdBy?.name}
@@ -493,6 +572,12 @@ export default function PurchaseOrderDetail() {
               <CardContent className="space-y-3">
                 <div className="flex justify-between"><span className="text-gray-500">PO Number</span><span className="font-mono">{order.orderNumber}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">PO Date</span><span>{formatDate(order.createdAt)}</span></div>
+                {order.purchaseInvoice?.invoiceNumber && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Invoice Number</span>
+                    <span className="font-semibold text-blue-600">{order.purchaseInvoice.invoiceNumber}</span>
+                  </div>
+                )}
                 <div className="flex justify-between"><span className="text-gray-500">Expected Delivery</span><span>{order.expectedDeliveryDate ? formatDate(order.expectedDeliveryDate) : "—"}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Warehouse</span><span>{order.warehouseDestination || "Main Warehouse"}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Payment Status</span><Badge className={order.paymentStatus === "PAID" ? "bg-green-100 text-green-700" : order.paymentStatus === "PARTIAL" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}>{order.paymentStatus || "UNPAID"}</Badge></div>

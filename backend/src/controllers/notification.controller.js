@@ -1,4 +1,5 @@
 // src/controllers/notification.controller.js
+
 import prisma from "../config/prisma.js";
 import { sendEmail } from "../config/nodemailer.js";
 import { logAction } from "../utils/auditLog.js";
@@ -19,16 +20,22 @@ const getEmailTemplate = (notification, user, actionUrl = null) => {
   };
   
   const typeLabels = {
-    LOW_STOCK: 'Low Stock Alert',
-    CREDIT_DUE: 'Credit Payment Due',
-    ORDER_UPDATE: 'Order Update',
-    SUPPLIER_DELAY: 'Supplier Delay',
-    PAYMENT_RECEIVED: 'Payment Received',
-    APPROVAL_REQUEST: 'Approval Required',
-    SYSTEM_WARNING: 'System Warning',
-    STOCK_ADJUSTMENT: 'Stock Adjustment',
-    DELIVERY_UPDATE: 'Delivery Update',
-    NEW_ORDER: 'New Order'
+    LOW_STOCK: '⚠️ Stock Alert',
+    OUT_OF_STOCK: '🚫 Out of Stock Alert',
+    CREDIT_DUE: '💳 Credit Payment Due',
+    ORDER_UPDATE: '📦 Order Update',
+    SUPPLIER_DELAY: '⏰ Supplier Delay',
+    PAYMENT_RECEIVED: '💰 Payment Received',
+    APPROVAL_REQUEST: '📋 Approval Required',
+    SYSTEM_WARNING: '⚙️ System Warning',
+    STOCK_ADJUSTMENT: '📊 Stock Adjustment',
+    DELIVERY_UPDATE: '🚚 Delivery Update',
+    NEW_ORDER: '🛒 New Order',
+    USER_CREATED: '👤 Account Created',
+    USER_STATUS_CHANGE: '🔐 Account Status',
+    USER_ROLE_CHANGE: '🔄 Role Update',
+    PASSWORD_CHANGE: '🔑 Password Changed',
+    PROFILE_CHANGE_REQUEST: '📝 Profile Change Request'
   };
   
   const color = priorityColors[notification.priority] || '#3b82f6';
@@ -43,109 +50,17 @@ const getEmailTemplate = (notification, user, actionUrl = null) => {
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>${notification.title}</title>
       <style>
-        body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-          line-height: 1.6;
-          color: #1f2937;
-          margin: 0;
-          padding: 0;
-          background-color: #f3f4f6;
-        }
-        .container {
-          max-width: 600px;
-          margin: 0 auto;
-          padding: 20px;
-        }
-        .card {
-          background: white;
-          border-radius: 12px;
-          overflow: hidden;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        }
-        .header {
-          background: ${color};
-          padding: 24px 20px;
-          text-align: center;
-          color: white;
-        }
-        .header h1 {
-          margin: 0;
-          font-size: 24px;
-          font-weight: 600;
-        }
-        .header p {
-          margin: 8px 0 0;
-          opacity: 0.9;
-          font-size: 14px;
-        }
-        .content {
-          padding: 24px;
-        }
-        .message-box {
-          background: #f9fafb;
-          border-radius: 8px;
-          padding: 16px;
-          margin: 16px 0;
-          border-left: 4px solid ${color};
-        }
-        .message-text {
-          font-size: 16px;
-          color: #374151;
-          margin: 0;
-        }
-        .details {
-          background: #f3f4f6;
-          border-radius: 8px;
-          padding: 16px;
-          margin: 16px 0;
-        }
-        .detail-row {
-          display: flex;
-          justify-content: space-between;
-          padding: 8px 0;
-          border-bottom: 1px solid #e5e7eb;
-        }
-        .detail-row:last-child {
-          border-bottom: none;
-        }
-        .detail-label {
-          font-weight: 600;
-          color: #4b5563;
-        }
-        .detail-value {
-          color: #1f2937;
-        }
-        .button {
-          display: inline-block;
-          background: ${color};
-          color: white;
-          padding: 12px 24px;
-          text-decoration: none;
-          border-radius: 8px;
-          font-weight: 500;
-          margin-top: 16px;
-          transition: background 0.2s;
-        }
-        .button:hover {
-          background: ${color}dd;
-        }
-        .footer {
-          background: #f9fafb;
-          padding: 16px 24px;
-          text-align: center;
-          font-size: 12px;
-          color: #6b7280;
-          border-top: 1px solid #e5e7eb;
-        }
-        .badge {
-          display: inline-block;
-          padding: 4px 8px;
-          border-radius: 4px;
-          font-size: 12px;
-          font-weight: 500;
-          background: ${color}20;
-          color: ${color};
-        }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #1f2937; margin: 0; padding: 0; background-color: #f3f4f6; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .card { background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        .header { background: ${color}; padding: 24px 20px; text-align: center; color: white; }
+        .header h1 { margin: 0; font-size: 24px; font-weight: 600; }
+        .header p { margin: 8px 0 0; opacity: 0.9; font-size: 14px; }
+        .content { padding: 24px; }
+        .message-box { background: #f9fafb; border-radius: 8px; padding: 16px; margin: 16px 0; border-left: 4px solid ${color}; }
+        .message-text { font-size: 16px; color: #374151; margin: 0; }
+        .button { display: inline-block; background: ${color}; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: 500; margin-top: 16px; }
+        .footer { background: #f9fafb; padding: 16px 24px; text-align: center; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; }
       </style>
     </head>
     <body>
@@ -164,7 +79,6 @@ const getEmailTemplate = (notification, user, actionUrl = null) => {
           </div>
           <div class="footer">
             <p>This is an automated notification from your Inventory Management System.</p>
-            <p>To update your notification preferences, please visit your account settings.</p>
             <p>&copy; ${new Date().getFullYear()} IMS - All Rights Reserved</p>
           </div>
         </div>
@@ -177,13 +91,54 @@ const getEmailTemplate = (notification, user, actionUrl = null) => {
 // ==================== HELPER FUNCTIONS ====================
 
 /**
+ * ✅ ONLY THESE TYPES SEND EMAILS TO ADMIN:
+ * - User Management: USER_CREATED, USER_STATUS_CHANGE, USER_ROLE_CHANGE, PASSWORD_CHANGE, PROFILE_CHANGE_REQUEST
+ * - Stock Alerts: LOW_STOCK, OUT_OF_STOCK
+ * 
+ * All other notifications are IN-APP ONLY
+ */
+const shouldSendEmail = (type) => {
+  const EMAIL_TYPES = [
+    // User Management (Admin needs to know)
+    'USER_CREATED',
+    'USER_STATUS_CHANGE',
+    'USER_ROLE_CHANGE',
+    'PASSWORD_CHANGE',
+    'PROFILE_CHANGE_REQUEST',  // ✅ Added for profile change requests
+    // Stock Alerts (Admin needs to know)
+    'LOW_STOCK',
+    'OUT_OF_STOCK',
+  ];
+  
+  return EMAIL_TYPES.includes(type);
+};
+
+/**
+ * Get admin users who should receive email notifications
+ */
+const getAdminRecipients = async () => {
+  return await prisma.user.findMany({
+    where: {
+      role: 'ADMIN',
+      isActive: true,
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      notificationPref: true,
+    },
+  });
+};
+
+/**
  * Send email notification to a user
  */
 const sendEmailNotification = async (notification, user, actionUrl = null) => {
   if (!user?.email) return null;
   
   try {
-    const subject = `[IMS] ${notification.title}`;
+    const subject = `[IMS ADMIN] ${notification.title}`;
     const html = getEmailTemplate(notification, user, actionUrl);
     
     await sendEmail(user.email, subject, html);
@@ -213,7 +168,7 @@ const sendEmailNotification = async (notification, user, actionUrl = null) => {
         notificationId: notification.id,
         recipientEmail: user.email,
         recipientName: user.name,
-        subject: `[IMS] ${notification.title}`,
+        subject: `[IMS ADMIN] ${notification.title}`,
         status: 'FAILED',
         errorMessage: error.message,
       },
@@ -223,8 +178,13 @@ const sendEmailNotification = async (notification, user, actionUrl = null) => {
   }
 };
 
+// ==================== CREATE NOTIFICATION ====================
+
 /**
- * Create notification and send to relevant users
+ * Create notification - EMAILS ONLY to ADMIN for:
+ * - User Management events
+ * - Stock Alerts
+ * Everything else is IN-APP only
  */
 export const createNotification = async (data) => {
   const {
@@ -232,7 +192,7 @@ export const createNotification = async (data) => {
     message,
     type,
     priority = 'INFORMATION',
-    userId = null, // If null, send to all managers/admins
+    userId = null,
     referenceId = null,
     referenceType = null,
     sendEmail = true,
@@ -242,17 +202,21 @@ export const createNotification = async (data) => {
   try {
     let recipients = [];
     
+    // Get recipients
     if (userId) {
-      // Send to specific user
       const user = await prisma.user.findUnique({
         where: { id: userId, isActive: true },
         include: { notificationPref: true },
       });
       if (user) recipients.push(user);
     } else {
-      // Send to all managers and admins
+      // For critical alerts, send to all admins and managers
+      const roles = ['ADMIN', 'MANAGER'];
       recipients = await prisma.user.findMany({
-        where: { role: { in: ['ADMIN', 'MANAGER'] }, isActive: true },
+        where: { 
+          role: { in: roles }, 
+          isActive: true 
+        },
         include: { notificationPref: true },
       });
     }
@@ -260,36 +224,7 @@ export const createNotification = async (data) => {
     const notifications = [];
     
     for (const recipient of recipients) {
-      // Check if user wants this type of notification
-      const prefs = recipient.notificationPref;
-      if (prefs) {
-        // Check type preference
-        let typeEnabled = true;
-        switch (type) {
-          case 'LOW_STOCK': typeEnabled = prefs.lowStockAlerts; break;
-          case 'CREDIT_DUE': typeEnabled = prefs.creditDueAlerts; break;
-          case 'SUPPLIER_DELAY': typeEnabled = prefs.supplierDelayAlerts; break;
-          case 'ORDER_UPDATE': typeEnabled = prefs.orderUpdates; break;
-          case 'DELIVERY_UPDATE': typeEnabled = prefs.deliveryUpdates; break;
-          case 'APPROVAL_REQUEST': typeEnabled = prefs.approvalRequests; break;
-          case 'SYSTEM_WARNING': typeEnabled = prefs.systemWarnings; break;
-          case 'STOCK_ADJUSTMENT': typeEnabled = prefs.stockAdjustments; break;
-          default: typeEnabled = true;
-        }
-        
-        // Check priority preference
-        let priorityEnabled = true;
-        switch (priority) {
-          case 'CRITICAL': priorityEnabled = prefs.criticalAlerts; break;
-          case 'WARNING': priorityEnabled = prefs.warningAlerts; break;
-          case 'INFORMATION': priorityEnabled = prefs.infoAlerts; break;
-          default: priorityEnabled = true;
-        }
-        
-        if (!typeEnabled || !priorityEnabled) continue;
-      }
-      
-      // Create notification
+      // Create notification in database (ALWAYS)
       const notification = await prisma.notification.create({
         data: {
           title,
@@ -304,9 +239,29 @@ export const createNotification = async (data) => {
       
       notifications.push(notification);
       
-      // Send email if enabled
-      if (sendEmail && recipient.notificationPref?.emailNotifications !== false) {
-        await sendEmailNotification(notification, recipient, actionUrl);
+      // ✅ EMAIL ONLY FOR SPECIFIC TYPES:
+      // - User Management (USER_CREATED, USER_STATUS_CHANGE, USER_ROLE_CHANGE, PASSWORD_CHANGE, PROFILE_CHANGE_REQUEST)
+      // - Stock Alerts (LOW_STOCK, OUT_OF_STOCK)
+      // Everything else is IN-APP ONLY
+      if (sendEmail && shouldSendEmail(type)) {
+        // ✅ Send email to ALL ADMIN users for these critical events
+        const admins = await getAdminRecipients();
+        
+        for (const admin of admins) {
+          // Don't send duplicate email to the same user
+          if (admin.id === recipient.id) continue;
+          
+          await sendEmailNotification(notification, admin, actionUrl);
+          console.log(`📧 Admin email sent to ${admin.email}: ${type}`);
+        }
+        
+        // Also send to the original recipient if they are not admin
+        if (recipient.role !== 'ADMIN') {
+          await sendEmailNotification(notification, recipient, actionUrl);
+          console.log(`📧 Email sent to ${recipient.email}: ${type}`);
+        }
+      } else {
+        console.log(`📧 Email skipped for ${recipient.email}: ${type} (in-app only)`);
       }
     }
     
@@ -317,31 +272,66 @@ export const createNotification = async (data) => {
   }
 };
 
+// ==================== STOCK ALERT HELPERS ====================
+
 /**
- * Auto-create low stock notification (replaces Alert system)
+ * ✅ EXPORTED: Check and create stock alert notification
+ * ALWAYS sends email to ADMIN for OUT_OF_STOCK and LOW_STOCK
  */
-export const checkAndCreateLowStockNotification = async (product) => {
-  if (product.currentStock > product.reorderLevel) return null;
+export const checkAndCreateStockAlert = async (product) => {
+  if (!product) return null;
   
-  // Check if unread notification already exists for this product
+  const isOutOfStock = product.currentStock === 0;
+  const isLowStock = product.currentStock > 0 && product.currentStock <= product.reorderLevel;
+  
+  if (!isOutOfStock && !isLowStock) return null;
+  
+  // Check if unread notification already exists
   const existing = await prisma.notification.findFirst({
     where: {
-      type: 'LOW_STOCK',
+      OR: [
+        { type: 'OUT_OF_STOCK' },
+        { type: 'LOW_STOCK' },
+      ],
       referenceId: product.id,
       isRead: false,
     },
   });
   
-  if (existing) return existing;
+  if (existing) {
+    // Update existing notification with latest stock info
+    await prisma.notification.update({
+      where: { id: existing.id },
+      data: {
+        message: isOutOfStock
+          ? `"${product.name}" is OUT OF STOCK! Current stock: 0 ${product.unit}(s). Reorder level: ${product.reorderLevel} ${product.unit}(s).`
+          : `"${product.name}" has only ${product.currentStock} ${product.unit}(s) remaining. Reorder level is ${product.reorderLevel} ${product.unit}(s).`,
+        priority: isOutOfStock ? 'CRITICAL' : 'WARNING',
+        updatedAt: new Date(),
+      },
+    });
+    return existing;
+  }
   
-  const priority = product.currentStock === 0 ? 'CRITICAL' : 'WARNING';
-  const stockStatus = product.currentStock === 0 ? 'Out of Stock' : 'Low Stock';
-  const message = `${stockStatus}: "${product.name}" has only ${product.currentStock} ${product.unit}(s) remaining. Reorder level is ${product.reorderLevel} ${product.unit}(s). Please create a purchase order to replenish stock.`;
+  let priority, type, title, message;
   
+  if (isOutOfStock) {
+    priority = 'CRITICAL';
+    type = 'OUT_OF_STOCK';
+    title = `🚫 OUT OF STOCK: ${product.name}`;
+    message = `"${product.name}" is COMPLETELY OUT OF STOCK! Current stock: 0 ${product.unit}(s). Reorder level: ${product.reorderLevel} ${product.unit}(s). Please create a purchase order IMMEDIATELY.`;
+  } else {
+    priority = 'WARNING';
+    type = 'LOW_STOCK';
+    title = `⚠️ Low Stock Alert: ${product.name}`;
+    message = `"${product.name}" has only ${product.currentStock} ${product.unit}(s) remaining. Reorder level is ${product.reorderLevel} ${product.unit}(s). Please create a purchase order.`;
+  }
+  
+  // This will automatically send email to ADMIN because type is in the email list
   return await createNotification({
-    title: `${stockStatus}: ${product.name}`,
+    title,
     message,
-    type: 'LOW_STOCK',
+    type,
     priority,
     referenceId: product.id,
     referenceType: 'Product',
@@ -350,44 +340,65 @@ export const checkAndCreateLowStockNotification = async (product) => {
 };
 
 /**
- * Auto-create credit due notification
+ * ✅ EXPORTED: Check and create LOW STOCK notification (legacy compatibility)
+ */
+export const checkAndCreateLowStockNotification = async (product) => {
+  return await checkAndCreateStockAlert(product);
+};
+
+// ==================== CREDIT DUE HELPER ====================
+
+/**
+ * ✅ EXPORTED: Check and create credit due notifications
+ * Runs via cron job - IN-APP ONLY (no email)
  */
 export const checkAndCreateCreditDueNotification = async () => {
-  const today = new Date();
-  const threeDaysFromNow = new Date();
-  threeDaysFromNow.setDate(today.getDate() + 3);
-  
-  const dueAccounts = await prisma.creditAccount.findMany({
-    where: {
-      dueDate: { lte: threeDaysFromNow },
-      remainingBalance: { gt: 0 },
-      status: { not: 'PAID' },
-    },
-    include: { customer: true },
-  });
-  
-  for (const account of dueAccounts) {
-    const daysUntilDue = Math.ceil((account.dueDate - today) / (1000 * 60 * 60 * 24));
-    const priority = daysUntilDue <= 0 ? 'CRITICAL' : 'WARNING';
-    const statusText = daysUntilDue <= 0 ? 'overdue' : `due in ${daysUntilDue} days`;
+  try {
+    const today = new Date();
+    const threeDaysFromNow = new Date();
+    threeDaysFromNow.setDate(today.getDate() + 3);
     
-    await createNotification({
-      title: `Credit Payment ${statusText.toUpperCase()}`,
-      message: `Customer "${account.customer.name}" has a credit payment of ₹${account.remainingBalance.toLocaleString()} ${statusText}. Due date: ${account.dueDate.toLocaleDateString()}.`,
-      type: 'CREDIT_DUE',
-      priority,
-      referenceId: account.customerId,
-      referenceType: 'Customer',
-      actionUrl: `/customers/${account.customerId}/credit`,
+    const dueAccounts = await prisma.creditAccount.findMany({
+      where: {
+        dueDate: { lte: threeDaysFromNow },
+        remainingBalance: { gt: 0 },
+        status: { not: 'PAID' },
+      },
+      include: { customer: true },
     });
+    
+    let createdCount = 0;
+    
+    for (const account of dueAccounts) {
+      const daysUntilDue = Math.ceil((account.dueDate - today) / (1000 * 60 * 60 * 24));
+      const priority = daysUntilDue <= 0 ? 'CRITICAL' : 'WARNING';
+      const statusText = daysUntilDue <= 0 ? 'overdue' : `due in ${daysUntilDue} days`;
+      
+      // IN-APP ONLY - no email for credit due
+      await createNotification({
+        title: `💳 Credit Payment ${statusText.toUpperCase()}`,
+        message: `Customer "${account.customer.name}" has a credit payment of ₹${account.remainingBalance.toLocaleString()} ${statusText}. Due date: ${account.dueDate.toLocaleDateString()}.`,
+        type: 'CREDIT_DUE',
+        priority,
+        referenceId: account.customerId,
+        referenceType: 'Customer',
+        actionUrl: `/customers/${account.customerId}/credit`,
+      });
+      
+      createdCount++;
+    }
+    
+    return createdCount;
+  } catch (error) {
+    console.error('Error checking credit due:', error);
+    throw error;
   }
 };
 
-// ==================== CONTROLLER FUNCTIONS ====================
+// ==================== REST OF CONTROLLER FUNCTIONS ====================
 
 /**
  * GET /api/notifications
- * Get all notifications with filters
  */
 export const getAllNotifications = async (req, res) => {
   try {
@@ -405,10 +416,10 @@ export const getAllNotifications = async (req, res) => {
     const skip = (Number(page) - 1) * Number(limit);
     
     const where = {
-      userId: req.user.id, // Users only see their own notifications
+      userId: req.user.id,
       ...(isRead !== undefined && { isRead: isRead === 'true' }),
-      ...(type && { type }),
-      ...(priority && { priority }),
+      ...(type && type !== 'all' && { type }),
+      ...(priority && priority !== 'all' && { priority }),
       ...(search && {
         OR: [
           { title: { contains: search, mode: 'insensitive' } },
@@ -429,22 +440,8 @@ export const getAllNotifications = async (req, res) => {
       prisma.notification.count({ where }),
     ]);
     
-    // Get unread count
     const unreadCount = await prisma.notification.count({
       where: { userId: req.user.id, isRead: false },
-    });
-    
-    // Get counts by type and priority for stats
-    const typeCounts = await prisma.notification.groupBy({
-      by: ['type'],
-      where: { userId: req.user.id },
-      _count: true,
-    });
-    
-    const priorityCounts = await prisma.notification.groupBy({
-      by: ['priority'],
-      where: { userId: req.user.id, isRead: false },
-      _count: true,
     });
     
     res.json({
@@ -458,8 +455,6 @@ export const getAllNotifications = async (req, res) => {
       },
       stats: {
         unreadCount,
-        byType: typeCounts,
-        byPriority: priorityCounts,
       },
     });
   } catch (error) {
@@ -470,7 +465,6 @@ export const getAllNotifications = async (req, res) => {
 
 /**
  * GET /api/notifications/stats
- * Get notification statistics
  */
 export const getNotificationStats = async (req, res) => {
   try {
@@ -484,6 +478,16 @@ export const getNotificationStats = async (req, res) => {
       info,
       last7Days,
       emailSentCount,
+      lowStockCount,
+      outOfStockCount,
+      creditDueCount,
+      orderUpdateCount,
+      paymentReceivedCount,
+      approvalRequestCount,
+      systemWarningCount,
+      stockAdjustmentCount,
+      deliveryUpdateCount,
+      newOrderCount,
     ] = await Promise.all([
       prisma.notification.count({ where }),
       prisma.notification.count({ where: { ...where, isRead: false } }),
@@ -499,13 +503,17 @@ export const getNotificationStats = async (req, res) => {
       prisma.notification.count({
         where: { ...where, emailSent: true },
       }),
+      prisma.notification.count({ where: { ...where, type: 'LOW_STOCK' } }),
+      prisma.notification.count({ where: { ...where, type: 'OUT_OF_STOCK' } }),
+      prisma.notification.count({ where: { ...where, type: 'CREDIT_DUE' } }),
+      prisma.notification.count({ where: { ...where, type: 'ORDER_UPDATE' } }),
+      prisma.notification.count({ where: { ...where, type: 'PAYMENT_RECEIVED' } }),
+      prisma.notification.count({ where: { ...where, type: 'APPROVAL_REQUEST' } }),
+      prisma.notification.count({ where: { ...where, type: 'SYSTEM_WARNING' } }),
+      prisma.notification.count({ where: { ...where, type: 'STOCK_ADJUSTMENT' } }),
+      prisma.notification.count({ where: { ...where, type: 'DELIVERY_UPDATE' } }),
+      prisma.notification.count({ where: { ...where, type: 'NEW_ORDER' } }),
     ]);
-    
-    // Get email log stats
-    const emailLogs = await prisma.emailLog.aggregate({
-      where: { notification: { userId: req.user.id } },
-      _count: true,
-    });
     
     res.json({
       success: true,
@@ -517,7 +525,19 @@ export const getNotificationStats = async (req, res) => {
         info,
         last7Days,
         emailSent: emailSentCount,
-        emailsSent: emailLogs._count,
+        outOfStock: outOfStockCount,
+        byType: {
+          LOW_STOCK: lowStockCount,
+          OUT_OF_STOCK: outOfStockCount,
+          CREDIT_DUE: creditDueCount,
+          ORDER_UPDATE: orderUpdateCount,
+          PAYMENT_RECEIVED: paymentReceivedCount,
+          APPROVAL_REQUEST: approvalRequestCount,
+          SYSTEM_WARNING: systemWarningCount,
+          STOCK_ADJUSTMENT: stockAdjustmentCount,
+          DELIVERY_UPDATE: deliveryUpdateCount,
+          NEW_ORDER: newOrderCount,
+        }
       },
     });
   } catch (error) {
@@ -528,7 +548,6 @@ export const getNotificationStats = async (req, res) => {
 
 /**
  * GET /api/notifications/:id
- * Get single notification
  */
 export const getNotificationById = async (req, res) => {
   try {
@@ -557,7 +576,6 @@ export const getNotificationById = async (req, res) => {
 
 /**
  * PATCH /api/notifications/:id/read
- * Mark a notification as read
  */
 export const markAsRead = async (req, res) => {
   try {
@@ -588,7 +606,6 @@ export const markAsRead = async (req, res) => {
 
 /**
  * PATCH /api/notifications/read-all
- * Mark all notifications as read
  */
 export const markAllAsRead = async (req, res) => {
   try {
@@ -616,7 +633,6 @@ export const markAllAsRead = async (req, res) => {
 
 /**
  * DELETE /api/notifications/:id
- * Delete a notification
  */
 export const deleteNotification = async (req, res) => {
   try {
@@ -644,7 +660,6 @@ export const deleteNotification = async (req, res) => {
 
 /**
  * DELETE /api/notifications/delete-all-read
- * Delete all read notifications
  */
 export const deleteAllRead = async (req, res) => {
   try {
@@ -670,8 +685,7 @@ export const deleteAllRead = async (req, res) => {
 };
 
 /**
- * POST /api/notifications/send-email
- * Resend email for a notification
+ * POST /api/notifications/:id/resend-email
  */
 export const resendEmailNotification = async (req, res) => {
   try {
@@ -686,6 +700,14 @@ export const resendEmailNotification = async (req, res) => {
     
     if (!notification) {
       return res.status(404).json({ success: false, message: 'Notification not found.' });
+    }
+    
+    // ✅ Only allow resend for email-enabled types
+    if (!shouldSendEmail(notification.type)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'This notification type does not support email.' 
+      });
     }
     
     const user = await prisma.user.findUnique({
@@ -718,7 +740,6 @@ export const resendEmailNotification = async (req, res) => {
 
 /**
  * GET /api/notifications/preferences
- * Get user notification preferences
  */
 export const getNotificationPreferences = async (req, res) => {
   try {
@@ -741,7 +762,6 @@ export const getNotificationPreferences = async (req, res) => {
 
 /**
  * PATCH /api/notifications/preferences
- * Update user notification preferences
  */
 export const updateNotificationPreferences = async (req, res) => {
   try {
@@ -749,7 +769,9 @@ export const updateNotificationPreferences = async (req, res) => {
       emailNotifications,
       smsNotifications,
       inAppNotifications,
+      pushNotifications,
       lowStockAlerts,
+      outOfStockAlerts,
       creditDueAlerts,
       supplierDelayAlerts,
       orderUpdates,
@@ -765,27 +787,31 @@ export const updateNotificationPreferences = async (req, res) => {
     const preferences = await prisma.notificationPreference.upsert({
       where: { userId: req.user.id },
       update: {
-        emailNotifications: emailNotifications ?? undefined,
-        smsNotifications: smsNotifications ?? undefined,
-        inAppNotifications: inAppNotifications ?? undefined,
-        lowStockAlerts: lowStockAlerts ?? undefined,
-        creditDueAlerts: creditDueAlerts ?? undefined,
-        supplierDelayAlerts: supplierDelayAlerts ?? undefined,
-        orderUpdates: orderUpdates ?? undefined,
-        systemWarnings: systemWarnings ?? undefined,
-        approvalRequests: approvalRequests ?? undefined,
-        stockAdjustments: stockAdjustments ?? undefined,
-        deliveryUpdates: deliveryUpdates ?? undefined,
-        criticalAlerts: criticalAlerts ?? undefined,
-        warningAlerts: warningAlerts ?? undefined,
-        infoAlerts: infoAlerts ?? undefined,
+        emailNotifications: emailNotifications !== undefined ? emailNotifications : undefined,
+        smsNotifications: smsNotifications !== undefined ? smsNotifications : undefined,
+        inAppNotifications: inAppNotifications !== undefined ? inAppNotifications : undefined,
+        pushNotifications: pushNotifications !== undefined ? pushNotifications : undefined,
+        lowStockAlerts: lowStockAlerts !== undefined ? lowStockAlerts : undefined,
+        outOfStockAlerts: outOfStockAlerts !== undefined ? outOfStockAlerts : undefined,
+        creditDueAlerts: creditDueAlerts !== undefined ? creditDueAlerts : undefined,
+        supplierDelayAlerts: supplierDelayAlerts !== undefined ? supplierDelayAlerts : undefined,
+        orderUpdates: orderUpdates !== undefined ? orderUpdates : undefined,
+        systemWarnings: systemWarnings !== undefined ? systemWarnings : undefined,
+        approvalRequests: approvalRequests !== undefined ? approvalRequests : undefined,
+        stockAdjustments: stockAdjustments !== undefined ? stockAdjustments : undefined,
+        deliveryUpdates: deliveryUpdates !== undefined ? deliveryUpdates : undefined,
+        criticalAlerts: criticalAlerts !== undefined ? criticalAlerts : undefined,
+        warningAlerts: warningAlerts !== undefined ? warningAlerts : undefined,
+        infoAlerts: infoAlerts !== undefined ? infoAlerts : undefined,
       },
       create: {
         userId: req.user.id,
         emailNotifications: emailNotifications ?? true,
         smsNotifications: smsNotifications ?? false,
         inAppNotifications: inAppNotifications ?? true,
+        pushNotifications: pushNotifications ?? true,
         lowStockAlerts: lowStockAlerts ?? true,
+        outOfStockAlerts: outOfStockAlerts ?? true,
         creditDueAlerts: creditDueAlerts ?? true,
         supplierDelayAlerts: supplierDelayAlerts ?? true,
         orderUpdates: orderUpdates ?? true,
@@ -808,11 +834,8 @@ export const updateNotificationPreferences = async (req, res) => {
   }
 };
 
-// ==================== CREATE NOTIFICATION (Admin/Manager) ====================
-
 /**
- * POST /api/notifications
- * Create a new notification (Admin/Manager only)
+ * POST /api/notifications (Admin/Manager only)
  */
 export const createManualNotification = async (req, res) => {
   try {
