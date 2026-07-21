@@ -36,7 +36,7 @@ const PORT = process.env.PORT || 3000;
 
 // ─── Core Middleware ──────────────────────────────────────────────────────────
 app.use(cors({
-  origin: process.env.CLIENT_URL || "http://localhost:5173",
+  origin: process.env.CLIENT_URL || "http://localhost:5173" || "https://inventory-management-system-one-peach.vercel.app/",
   credentials: true,
 }));
 app.use(express.json());
