@@ -339,7 +339,7 @@ export default function CreateOrder() {
     if (paymentMethod === "CASH" && cashAmountReceived) {
       const received = parseFloat(cashAmountReceived);
       if (received < totalAmount) {
-        toast.error(`Amount received (₦${received}) is less than total (₦${totalAmount})`);
+        toast.error(`Amount received (रु${received}) is less than total (रु${totalAmount})`);
         return false;
       }
     }
@@ -816,7 +816,7 @@ export default function CreateOrder() {
                     <div>
                       <Label className="text-sm text-green-700">Amount Received</Label>
                       <div className="relative mt-1.5">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₦</span>
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">रु</span>
                         <Input
                           type="number"
                           placeholder="500.00"
@@ -829,7 +829,7 @@ export default function CreateOrder() {
                     <div>
                       <Label className="text-sm text-green-700">Balance Returned</Label>
                       <div className="relative mt-1.5">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₦</span>
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">रु</span>
                         <Input
                           type="text"
                           value={cashBalanceReturned.toFixed(2)}

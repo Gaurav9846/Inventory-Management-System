@@ -138,7 +138,7 @@ function CategoryForm({ open, onOpenChange, type, onSaved }) {
   );
 }
 
-// Product Form Component
+// Product Form Component - productionCost REMOVED
 function ProductForm({ open, onOpenChange, editData, onSaved }) {
   const { user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
@@ -155,7 +155,6 @@ function ProductForm({ open, onOpenChange, editData, onSaved }) {
     unit: "piece",
     costPrice: "",
     sellingPrice: "",
-    productionCost: "",
     reorderLevel: "10",
     description: "",
     supplierId: "",
@@ -178,7 +177,6 @@ function ProductForm({ open, onOpenChange, editData, onSaved }) {
         unit: editData.unit || "piece",
         costPrice: editData.costPrice?.toString() || "",
         sellingPrice: editData.sellingPrice?.toString() || "",
-        productionCost: editData.productionCost?.toString() || "",
         reorderLevel: editData.reorderLevel?.toString() || "10",
         description: editData.description || "",
         supplierId: editData.supplierId || "",
@@ -192,7 +190,6 @@ function ProductForm({ open, onOpenChange, editData, onSaved }) {
         unit: "piece",
         costPrice: "",
         sellingPrice: "",
-        productionCost: "",
         reorderLevel: "10",
         description: "",
         supplierId: "",
@@ -247,7 +244,6 @@ function ProductForm({ open, onOpenChange, editData, onSaved }) {
         ...formData,
         costPrice: formData.costPrice ? parseFloat(formData.costPrice) : null,
         sellingPrice: formData.sellingPrice ? parseFloat(formData.sellingPrice) : null,
-        productionCost: formData.productionCost ? parseFloat(formData.productionCost) : null,
         reorderLevel: parseInt(formData.reorderLevel) || 10,
         supplierId: formData.type === "RAW_MATERIAL" ? (formData.supplierId || null) : null,
       };
@@ -369,8 +365,8 @@ function ProductForm({ open, onOpenChange, editData, onSaved }) {
               </div>
             </div>
 
-            {/* Pricing - Context Aware */}
-            <div className="grid grid-cols-3 gap-4">
+            {/* Pricing - productionCost REMOVED */}
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>{formData.type === "PRODUCT" ? "Cost Price" : "Unit Cost"}</Label>
                 <Input
@@ -383,30 +379,17 @@ function ProductForm({ open, onOpenChange, editData, onSaved }) {
                 />
               </div>
               {formData.type === "PRODUCT" && (
-                <>
-                  <div>
-                    <Label>Selling Price</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={formData.sellingPrice}
-                      onChange={(e) => setFormData({ ...formData, sellingPrice: e.target.value })}
-                      placeholder="0.00"
-                      className="mt-1"
-                    />
-                  </div>
-                  <div>
-                    <Label>Production Cost</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={formData.productionCost}
-                      onChange={(e) => setFormData({ ...formData, productionCost: e.target.value })}
-                      placeholder="0.00"
-                      className="mt-1"
-                    />
-                  </div>
-                </>
+                <div>
+                  <Label>Selling Price</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={formData.sellingPrice}
+                    onChange={(e) => setFormData({ ...formData, sellingPrice: e.target.value })}
+                    placeholder="0.00"
+                    className="mt-1"
+                  />
+                </div>
               )}
             </div>
 
@@ -580,7 +563,7 @@ export default function AdminProductCatalog() {
 
   const formatPrice = (value) => {
     if (value === null || value === undefined) return "—";
-    return `Rs. ${value.toFixed(2)}`;
+    return `रु. ${value.toFixed(2)}`;
   };
 
   return (

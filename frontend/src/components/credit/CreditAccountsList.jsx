@@ -35,7 +35,6 @@ import {
   AlertCircle,
   Phone,
   User,
-  DollarSign,
   Banknote,
   Smartphone,
   Landmark,
@@ -45,6 +44,7 @@ import {
 import { toast } from "sonner";
 import { formatCurrency, formatDate } from "@/utils/helpers.js";
 import { CustomerLedger } from "./CustomerLedger.jsx";
+import NepaliRupeeIcon from "@/components/ui/NepaliRupeeIcon.jsx";
 
 // ==================== STATUS CONFIGURATION ====================
 
@@ -418,7 +418,7 @@ export function CreditAccountsList() {
                               className="bg-green-600 hover:bg-green-700 gap-1"
                               onClick={() => openPaymentDialog(account)}
                             >
-                              <DollarSign className="h-4 w-4" />
+                              <NepaliRupeeIcon className="h-4 w-4" />
                               Pay
                             </Button>
                           )}
