@@ -34,7 +34,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-linear-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md space-y-6">
 
         {/* Brand */}
@@ -103,13 +103,6 @@ export default function Login() {
             </form>
           </CardContent>
         </Card>
-
-        {/* Default credentials hint */}
-        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 space-y-2">
-          <p className="text-xs font-semibold text-slate-400 text-center">Default Admin Credentials</p>
-          <div className="flex justify-between text-xs"><span className="text-slate-500">Email</span><span className="font-mono text-slate-300">admin@fusionit.com</span></div>
-          <div className="flex justify-between text-xs"><span className="text-slate-500">Password</span><span className="font-mono text-slate-300">Admin@123</span></div>
-        </div>
 
         <p className="text-center text-xs text-slate-600">Fusion I.T. Solutions · Pokhara · v2.0.0</p>
       </div>
