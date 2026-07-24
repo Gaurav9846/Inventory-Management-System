@@ -2196,7 +2196,7 @@ export default function ManagerReports() {
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-gray-700">Date:</span>
               <Select value={dateRange} onValueChange={handleDateRangeChange}>
-                <SelectTrigger className="h-9 w-[160px] text-sm"><SelectValue placeholder="Select date range" /></SelectTrigger>
+                <SelectTrigger className="h-9 w-40 text-sm"><SelectValue placeholder="Select date range" /></SelectTrigger>
                 <SelectContent>
                   {DATE_RANGE_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                 </SelectContent>
