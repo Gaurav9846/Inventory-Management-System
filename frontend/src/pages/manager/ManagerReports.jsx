@@ -1,4 +1,5 @@
 // src/pages/manager/ManagerReports.jsx
+
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -41,6 +42,7 @@ import {
   Printer,
   ChevronLeft,
   ChevronRight,
+  History,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDate, formatCurrency } from '@/utils/helpers';
@@ -60,6 +62,7 @@ import {
 import * as XLSX from 'xlsx';
 import { toPng } from 'html-to-image';
 
+// ✅ Added "All Time" option
 const DATE_RANGE_OPTIONS = [
   { value: 'today', label: 'Today' },
   { value: 'yesterday', label: 'Yesterday' },
@@ -70,6 +73,7 @@ const DATE_RANGE_OPTIONS = [
   { value: 'last3Months', label: 'Last 3 Months' },
   { value: 'last6Months', label: 'Last 6 Months' },
   { value: 'thisYear', label: 'This Year' },
+  { value: 'allTime', label: 'All Time' },
   { value: 'custom', label: 'Custom Range' },
 ];
 
@@ -81,7 +85,7 @@ const PAYMENT_OPTIONS = [
   { value: 'pay_later', label: 'Pay Later' },
 ];
 
-const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#06B6D4'];
+const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#06B6D6'];
 
 export default function ManagerReports() {
   const [loading, setLoading] = useState(true);
@@ -100,7 +104,6 @@ export default function ManagerReports() {
   const [sortBy, setSortBy] = useState('revenue');
   const [paymentDisplayMode, setPaymentDisplayMode] = useState('amount');
 
-  // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [totalRecords, setTotalRecords] = useState(0);
@@ -154,6 +157,11 @@ export default function ManagerReports() {
       incomingCash: 0,
       outgoingCash: 0,
       netCashFlow: 0,
+      // Supplier-specific fields
+      totalPurchased: 0,
+      purchaseOrderCount: 0,
+      supplierOutstanding: 0,
+      lastPurchaseDate: null,
     },
     revenueTrend: [],
     paymentMethods: [],
@@ -176,7 +184,6 @@ export default function ManagerReports() {
   const debounceTimer = useRef(null);
   const reportRef = useRef(null);
 
-  // Helper to format product quantities with arrow notation on separate lines
   const formatProductQuantities = useCallback((items) => {
     if (!items || items.length === 0) return 'N/A';
     return items.map(item => `${item.name || 'Unknown'} → ${item.quantity || 0}`).join('\n');
@@ -388,7 +395,6 @@ export default function ManagerReports() {
 
       const wb = XLSX.utils.book_new();
 
-      // 1. Summary Sheet
       const s = data.summary;
       const context = getFilterContext.type;
       
@@ -409,10 +415,10 @@ export default function ManagerReports() {
         ];
       } else if (context === 'supplier') {
         statsRows = [
-          ['Total Purchased', formatCurrency(s.purchaseValue || s.totalRevenue || 0)],
-          ['Purchase Cost', formatCurrency(s.purchaseCost || 0)],
-          ['Outstanding Payment', formatCurrency(s.outstandingPayment || s.pendingPayments || 0)],
-          ['Total Deliveries', s.totalDeliveries || s.deliveryCount || 0],
+          ['Total Purchased', formatCurrency(s.totalPurchased || s.purchaseValue || 0)],
+          ['Purchase Orders', s.purchaseOrderCount || 0],
+          ['Outstanding Payment', formatCurrency(s.supplierOutstanding || s.outstandingPayment || 0)],
+          ['Last Purchase Date', s.lastPurchaseDate ? formatDate(s.lastPurchaseDate) : 'N/A'],
         ];
       } else if (context === 'customer') {
         statsRows = [
@@ -466,7 +472,6 @@ export default function ManagerReports() {
       ws1['!cols'] = [{ wch: 25 }, { wch: 30 }];
       XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
 
-      // 2. Transactions Sheet
       const config = getTableConfig;
       const tableData = config.data || [];
       
@@ -502,7 +507,6 @@ export default function ManagerReports() {
         XLSX.utils.book_append_sheet(wb, ws2, 'Transactions');
       }
 
-      // 3. Revenue Trend Sheet
       if (data.revenueTrend && data.revenueTrend.length > 0) {
         const trendData = [
           ['REVENUE TREND'],
@@ -520,7 +524,6 @@ export default function ManagerReports() {
         XLSX.utils.book_append_sheet(wb, ws3, 'Revenue Trend');
       }
 
-      // 4. Top Products Sheet
       if (data.topProducts && data.topProducts.length > 0) {
         const productData = [
           ['TOP PRODUCTS'],
@@ -539,7 +542,6 @@ export default function ManagerReports() {
         XLSX.utils.book_append_sheet(wb, ws4, 'Top Products');
       }
 
-      // 5. Payment Methods Sheet
       if (data.paymentMethods && data.paymentMethods.length > 0 && !(data.paymentMethods.length === 1 && data.paymentMethods[0].name === 'No Data')) {
         const paymentData = [
           ['PAYMENT METHODS'],
@@ -645,10 +647,10 @@ export default function ManagerReports() {
         `;
       } else if (contextType === 'supplier') {
         statsHTML = `
-          <div class="stat-card"><div class="stat-title">Total Purchased</div><div class="stat-value">${formatCurrency(s.purchaseValue || s.totalRevenue || 0)}</div></div>
-          <div class="stat-card"><div class="stat-title">Purchase Cost</div><div class="stat-value">${formatCurrency(s.purchaseCost || 0)}</div></div>
-          <div class="stat-card"><div class="stat-title">Outstanding Payment</div><div class="stat-value">${formatCurrency(s.outstandingPayment || s.pendingPayments || 0)}</div></div>
-          <div class="stat-card"><div class="stat-title">Total Deliveries</div><div class="stat-value">${s.totalDeliveries || s.deliveryCount || 0}</div></div>
+          <div class="stat-card"><div class="stat-title">Total Purchased</div><div class="stat-value">${formatCurrency(s.totalPurchased || s.purchaseValue || 0)}</div></div>
+          <div class="stat-card"><div class="stat-title">Purchase Orders</div><div class="stat-value">${s.purchaseOrderCount || 0}</div></div>
+          <div class="stat-card"><div class="stat-title">Outstanding Payment</div><div class="stat-value">${formatCurrency(s.supplierOutstanding || s.outstandingPayment || 0)}</div></div>
+          <div class="stat-card"><div class="stat-title">Last Purchase Date</div><div class="stat-value">${s.lastPurchaseDate ? formatDate(s.lastPurchaseDate) : 'N/A'}</div></div>
         `;
       } else if (contextType === 'customer') {
         statsHTML = `
@@ -1316,10 +1318,34 @@ export default function ManagerReports() {
     if (context === 'supplier') {
       return (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard title="Total Purchased" value={formatCurrency(s.purchaseValue || s.totalRevenue || 0)} subtitle="Total purchase value" icon={DollarSign} color="blue" />
-          <StatCard title="Purchase Cost" value={formatCurrency(s.purchaseCost || 0)} subtitle="Total cost" icon={Wallet} color="green" />
-          <StatCard title="Outstanding Payment" value={formatCurrency(s.outstandingPayment || s.pendingPayments || 0)} subtitle="Amount owed" icon={CreditCard} color="yellow" />
-          <StatCard title="Total Deliveries" value={s.totalDeliveries || s.deliveryCount || 0} subtitle="Deliveries received" icon={Truck} color="purple" />
+          <StatCard 
+            title="Total Purchased" 
+            value={formatCurrency(s.totalPurchased || s.purchaseValue || 0)} 
+            subtitle="Total purchase value from this supplier" 
+            icon={DollarSign} 
+            color="blue" 
+          />
+          <StatCard 
+            title="Purchase Orders" 
+            value={s.purchaseOrderCount || 0} 
+            subtitle={`Total orders placed with this supplier`} 
+            icon={ShoppingCart} 
+            color="green" 
+          />
+          <StatCard 
+            title="Outstanding Payment" 
+            value={formatCurrency(s.supplierOutstanding || s.outstandingPayment || 0)} 
+            subtitle="Amount owed to this supplier" 
+            icon={CreditCard} 
+            color="yellow" 
+          />
+          <StatCard 
+            title="Last Purchase Date" 
+            value={s.lastPurchaseDate ? formatDate(s.lastPurchaseDate) : 'N/A'} 
+            subtitle="Most recent order from this supplier" 
+            icon={Calendar} 
+            color="purple" 
+          />
         </div>
       );
     }
@@ -1353,6 +1379,7 @@ export default function ManagerReports() {
       );
     }
 
+    // OVERVIEW
     return (
       <>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -1376,7 +1403,6 @@ export default function ManagerReports() {
     const config = getTableConfig;
     const data = config.data || [];
     
-    // Use server-side pagination info
     const pagination = reportData.pagination || { total: 0, page: 1, limit: 10, totalPages: 0 };
     const totalItems = pagination.total || data.length;
     const totalPages = pagination.totalPages || Math.ceil(totalItems / pageSize);
@@ -1384,7 +1410,6 @@ export default function ManagerReports() {
     const startIndex = (currentPage - 1) * pageSize;
     const endIndex = Math.min(startIndex + pageSize, totalItems);
 
-    // Use the data from server (already paginated) or fallback to client-side slicing
     const displayData = data;
 
     if (totalItems === 0) {
@@ -1470,7 +1495,6 @@ export default function ManagerReports() {
             </Table>
           </div>
           
-          {/* Pagination Controls - Show when total items > page size OR totalPages > 1 */}
           {(totalItems > pageSize || totalPages > 1) && (
             <div className="flex items-center justify-between p-3 border-t flex-wrap gap-2">
               <div className="text-xs text-gray-500">
@@ -1488,7 +1512,6 @@ export default function ManagerReports() {
                   Previous
                 </Button>
                 
-                {/* Page numbers - show up to 7 pages */}
                 {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
                   let pageNum;
                   if (totalPages <= 7) {

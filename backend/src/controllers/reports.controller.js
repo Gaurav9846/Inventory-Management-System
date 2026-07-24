@@ -43,6 +43,9 @@ export const getDashboardReport = async (req, res) => {
     });
     const context = getContext({ employeeId, productId, supplierId, customerId, paymentMethod });
 
+    // ✅ Initialize supplierStats as empty object
+    let supplierStats = {};
+
     const [
       revenueData,
       ordersData,
@@ -81,6 +84,62 @@ export const getDashboardReport = async (req, res) => {
       supplierId && supplierId !== 'all' ? getFilteredPurchaseOrders(supplierId, dateFilter) : Promise.resolve([]),
     ]);
 
+    // ✅ FIXED: Calculate supplier stats when supplier filter is active
+    if (supplierId && supplierId !== 'all') {
+      const supplierWhere = {
+        supplierId: supplierId,
+        ...(dateFilter && { createdAt: dateFilter }),
+      };
+
+      // 1. Total Purchased from this supplier (ALL purchase orders - no status filter)
+      const purchaseResult = await prisma.purchaseOrder.aggregate({
+        where: supplierWhere,
+        _sum: { totalAmount: true },
+      });
+      const totalPurchased = purchaseResult._sum.totalAmount || 0;
+
+      // 2. Purchase Orders Count (ALL purchase orders)
+      const purchaseOrderCount = await prisma.purchaseOrder.count({
+        where: supplierWhere,
+      });
+
+      // 3. Outstanding Payment (FIXED: Calculate from ALL orders)
+      const allOrders = await prisma.purchaseOrder.findMany({
+        where: supplierWhere,
+        select: {
+          totalAmount: true,
+          payments: { select: { amount: true } },
+        },
+      });
+
+      let totalOutstanding = 0;
+      let totalPaidToSupplier = 0;
+      
+      for (const order of allOrders) {
+        const paidAmount = order.payments.reduce((sum, p) => sum + p.amount, 0);
+        totalPaidToSupplier += paidAmount;
+        const outstanding = order.totalAmount - paidAmount;
+        totalOutstanding += outstanding > 0 ? outstanding : 0;
+      }
+      const supplierOutstanding = Math.round(totalOutstanding * 100) / 100;
+
+      // 4. Last Purchase Date
+      const lastPurchase = await prisma.purchaseOrder.findFirst({
+        where: supplierWhere,
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
+      const lastPurchaseDate = lastPurchase?.createdAt || null;
+
+      supplierStats = {
+        totalPurchased,
+        purchaseOrderCount,
+        supplierOutstanding,
+        lastPurchaseDate,
+        totalPaidToSupplier,
+      };
+    }
+
     // If supplier filter is active, merge purchase orders with filtered orders
     let finalFilteredOrders = filteredOrdersResult.data || [];
     let pagination = filteredOrdersResult.pagination || { total: 0, page: 1, limit: 10, totalPages: 0 };
@@ -106,6 +165,7 @@ export const getDashboardReport = async (req, res) => {
       paymentMethod,
       employeeData,
       customerDataDetailed,
+      supplierStats,
     });
 
     const response = {
@@ -154,11 +214,17 @@ const getContext = ({ employeeId, productId, supplierId, customerId, paymentMeth
   return 'overview';
 };
 
+// ✅ FIXED: All Time date filter support
 const buildDateFilterWithGrouping = (dateRange, fromDate, toDate) => {
   const now = new Date();
   let start = new Date();
   let end = new Date();
   let groupBy = 'day';
+
+  // ✅ ALL TIME - No date filter
+  if (dateRange === 'allTime') {
+    return { dateFilter: null, groupBy: 'month' };
+  }
 
   if (dateRange === 'custom' && fromDate && toDate) {
     start = new Date(fromDate);
@@ -362,7 +428,6 @@ const getCustomerPurchaseHistory = async (whereClause, customerId) => {
       paidPerOrder[orderId] += payment.amount || 0;
     }
 
-    // IMPORTANT: Use creditAccount.paidAmount as the total paid for credit orders
     const totalPaid = creditAccount?.paidAmount || 0;
     const totalPurchased = orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
     const creditRemaining = creditAccount?.remainingBalance || Math.max(0, totalPurchased - totalPaid);
@@ -502,8 +567,6 @@ const getCustomerPaymentMethods = async (whereClause, customerId) => {
   }
 };
 
-// ==================== FIXED: getCustomerOrders ====================
-
 const getCustomerOrders = async (customerId, dateFilter) => {
   if (!customerId || customerId === 'all') return [];
   
@@ -565,7 +628,6 @@ const getCustomerOrders = async (customerId, dateFilter) => {
       let creditRemainingForOrder = 0;
       
       if (isCredit && creditAccount) {
-        // IMPORTANT: Use proportional distribution from credit account
         if (totalCreditAmount > 0) {
           const proportion = (order.totalAmount || 0) / totalCreditAmount;
           paidAmountForOrder = creditAccount.paidAmount * proportion;
@@ -607,8 +669,6 @@ const getCustomerOrders = async (customerId, dateFilter) => {
     return [];
   }
 };
-
-// ==================== FIXED: getCustomerDetails ====================
 
 const getCustomerDetails = async (whereClause, customerId, dateFilter) => {
   try {
@@ -654,8 +714,6 @@ const getCustomerDetails = async (whereClause, customerId, dateFilter) => {
   }
 };
 
-// ==================== FIXED: getFilteredOrders ====================
-
 const getFilteredOrders = async (whereClause, productId, supplierId, customerId, employeeId, userRole, userId, page = 1, limit = 10) => {
   try {
     const orderWhere = { ...whereClause };
@@ -690,7 +748,6 @@ const getFilteredOrders = async (whereClause, productId, supplierId, customerId,
       orderBy: { createdAt: 'desc' },
     });
 
-    // Get credit accounts for all customers in these orders
     const customerIds = [...new Set(orders.filter(o => o.customerId).map(o => o.customerId))];
     let creditAccountsMap = {};
     
@@ -712,7 +769,6 @@ const getFilteredOrders = async (whereClause, productId, supplierId, customerId,
       }
     }
 
-    // Get cash/online payments for these orders
     const orderIds = orders.map(o => o.id);
     let cashPaymentsMap = {};
     if (orderIds.length > 0) {
@@ -745,30 +801,24 @@ const getFilteredOrders = async (whereClause, productId, supplierId, customerId,
       let paidAmountForOrder = 0;
       let creditRemainingForOrder = 0;
       
-      // IMPORTANT: Check if this is a credit order
       if (order.payment?.method === "CREDIT") {
-        // For credit orders, ONLY use the credit account data
         if (creditAccount) {
-          // Get all credit orders for this customer
           const creditOrders = orders.filter(o => 
             o.payment?.method === "CREDIT" && o.customerId === customerId
           );
           const totalCreditAmount = creditOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
           
           if (totalCreditAmount > 0) {
-            // Proportional distribution of paid amount from credit account
             const proportion = (order.totalAmount || 0) / totalCreditAmount;
             paidAmountForOrder = creditAccount.paidAmount * proportion;
           }
           
           creditRemainingForOrder = Math.max(0, (order.totalAmount || 0) - paidAmountForOrder);
         } else {
-          // No credit account found - show 0 paid, full amount as credit remaining
           paidAmountForOrder = 0;
           creditRemainingForOrder = order.totalAmount || 0;
         }
       } else {
-        // For cash/online payments, use the payment amount if completed
         if (order.payment?.status === "COMPLETED") {
           paidAmountForOrder = cashPaymentsMap[order.id] || order.payment?.amount || 0;
         }
@@ -921,16 +971,32 @@ const getRevenueSummary = async (whereClause, dateFilter, groupBy = 'day', suppl
   }
 };
 
+// ✅ FIXED: Orders Completed - ONLY COMPLETED status
 const getOrderStats = async (whereClause) => {
   try {
-    const [total, completed, pending, cancelled, processing, dispatched] = await Promise.all([
-      prisma.salesOrder.count({ where: whereClause }),
-      prisma.salesOrder.count({ where: { ...whereClause, status: "COMPLETED" } }),
-      prisma.salesOrder.count({ where: { ...whereClause, status: "PENDING" } }),
-      prisma.salesOrder.count({ where: { ...whereClause, status: "CANCELLED" } }),
-      prisma.salesOrder.count({ where: { ...whereClause, status: "PROCESSING" } }),
-      prisma.salesOrder.count({ where: { ...whereClause, status: "DISPATCHED" } }),
-    ]);
+    // ✅ Only count COMPLETED status for completed orders
+    const completed = await prisma.salesOrder.count({ 
+      where: { ...whereClause, status: "COMPLETED" } 
+    });
+    
+    const pending = await prisma.salesOrder.count({ 
+      where: { ...whereClause, status: "PENDING" } 
+    });
+    
+    const cancelled = await prisma.salesOrder.count({ 
+      where: { ...whereClause, status: "CANCELLED" } 
+    });
+    
+    const processing = await prisma.salesOrder.count({ 
+      where: { ...whereClause, status: "PROCESSING" } 
+    });
+    
+    const dispatched = await prisma.salesOrder.count({ 
+      where: { ...whereClause, status: "DISPATCHED" } 
+    });
+
+    const total = completed + pending + cancelled + processing + dispatched;
+
     return { total, completed, pending, cancelled, processing, dispatched };
   } catch (error) {
     console.error("Error in getOrderStats:", error);
@@ -938,6 +1004,7 @@ const getOrderStats = async (whereClause) => {
   }
 };
 
+// ✅ FIXED: Get filtered purchase orders (for supplier filter)
 const getFilteredPurchaseOrders = async (supplierId, dateFilter) => {
   if (!supplierId || supplierId === 'all') return [];
   
@@ -985,7 +1052,7 @@ const getFilteredPurchaseOrders = async (supplierId, dateFilter) => {
         productList: formattedItems,
         quantity: order.items.reduce((s, i) => s + i.quantity, 0),
         totalAmount: order.totalAmount || 0,
-        totalPaid,
+        totalPaid: totalPaid,
         outstanding: (order.totalAmount || 0) - totalPaid,
         status: order.status,
         paymentStatus: order.paymentStatus,
@@ -1693,6 +1760,7 @@ const getCashFlowSummary = async (whereClause) => {
 
 // ==================== SUMMARY & UTILITY FUNCTIONS ====================
 
+// ✅ FIXED: Build summary with correct supplier stats
 const buildSummary = ({ 
   revenueData, 
   ordersData, 
@@ -1708,9 +1776,16 @@ const buildSummary = ({
   paymentMethod,
   employeeData,
   customerDataDetailed,
+  supplierStats,
 }) => {
   const totalRevenue = revenueData.reduce((s, i) => s + i.revenue, 0);
-  const growth = revenueData.length > 1 ? ((revenueData[revenueData.length - 1].revenue - revenueData[revenueData.length - 2].revenue) / (revenueData[revenueData.length - 2].revenue || 1)) * 100 : 0;
+  
+  let growth = 0;
+  if (revenueData.length > 1) {
+    const currentPeriod = revenueData[revenueData.length - 1]?.revenue || 0;
+    const previousPeriod = revenueData[revenueData.length - 2]?.revenue || 0;
+    growth = previousPeriod > 0 ? ((currentPeriod - previousPeriod) / previousPeriod) * 100 : 0;
+  }
 
   const base = {
     totalRevenue,
@@ -1741,10 +1816,27 @@ const buildSummary = ({
   }
   if (context === 'product') {
     const totalUnits = revenueData.reduce((s, i) => s + i.orders, 0);
-    return { ...base, unitsSold: totalUnits, profitGenerated: totalRevenue * 0.25, remainingStock: inventoryData.totalProducts || 0, averageSellingPrice: totalUnits > 0 ? totalRevenue / totalUnits : 0 };
+    return { 
+      ...base, 
+      unitsSold: totalUnits, 
+      profitGenerated: totalRevenue * 0.25, 
+      remainingStock: inventoryData.totalProducts || 0, 
+      averageSellingPrice: totalUnits > 0 ? totalRevenue / totalUnits : 0 
+    };
   }
   if (context === 'supplier') {
-    return { ...base, purchaseValue: totalRevenue, purchaseCost: totalRevenue * 0.7, productsPurchased: revenueData.reduce((s, i) => s + i.orders, 0), pendingPayments: creditData.totalRemaining || 0, outstandingPayment: creditData.totalRemaining || 0, deliveryCount: ordersData.total || 0 };
+    // ✅ Use supplierStats for supplier-specific data
+    return { 
+      ...base, 
+      // Supplier-specific fields
+      totalPurchased: supplierStats?.totalPurchased || 0,
+      purchaseOrderCount: supplierStats?.purchaseOrderCount || 0,
+      supplierOutstanding: supplierStats?.supplierOutstanding || 0,
+      lastPurchaseDate: supplierStats?.lastPurchaseDate || null,
+      // Backward compatibility fields
+      purchaseValue: supplierStats?.totalPurchased || 0,
+      outstandingPayment: supplierStats?.supplierOutstanding || 0,
+    };
   }
   if (context === 'customer') {
     const customerCreditRemaining = customerDataDetailed?.creditRemaining || creditData?.totalRemaining || 0;
@@ -1762,7 +1854,13 @@ const buildSummary = ({
     };
   }
   if (context === 'payment') {
-    return { ...base, totalCashIncome: paymentMethod === 'cash' ? totalRevenue : 0, totalOnlineIncome: paymentMethod === 'online' ? totalRevenue : 0, customerCreditRemaining: creditData.totalRemaining || 0, supplierOutstandingPayment: creditData.totalRemaining || 0 };
+    return { 
+      ...base, 
+      totalCashIncome: paymentMethod === 'cash' ? totalRevenue : 0, 
+      totalOnlineIncome: paymentMethod === 'online' ? totalRevenue : 0, 
+      customerCreditRemaining: creditData.totalRemaining || 0, 
+      supplierOutstandingPayment: creditData.totalRemaining || 0 
+    };
   }
   return base;
 };
@@ -1934,4 +2032,16 @@ const convertToCSV = (data) => {
 const formatDate = (date) => {
   const d = new Date(date);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// ==================== EXPORTS ====================
+
+export default {
+  getDashboardReport,
+  getRevenueReport,
+  getTopProductsReport,
+  getPaymentBreakdownReport,
+  getCreditSummaryReport,
+  getInventoryReport,
+  exportReport,
 };
