@@ -6,7 +6,7 @@ import { sendEmail } from "../config/nodemailer.js";
 import { welcomeUserTemplate } from "../utils/emailTemplates.js";
 import { createNotification } from "./notification.controller.js";
 
-// ✅ GET /api/users - FIXED to include phone
+// ✅ GET /api/users - Get all users
 export const getAllUsers = async (req, res) => {
   try {
     const users = await prisma.user.findMany({
@@ -14,7 +14,7 @@ export const getAllUsers = async (req, res) => {
         id: true, 
         name: true, 
         email: true, 
-        phone: true,  // ✅ Added phone
+        phone: true,
         role: true, 
         isActive: true, 
         createdAt: true 
@@ -23,11 +23,12 @@ export const getAllUsers = async (req, res) => {
     });
     res.json(users);
   } catch (err) {
+    console.error("❌ Error in getAllUsers:", err);
     res.status(500).json({ message: err.message });
   }
 };
 
-// ✅ GET /api/users/:id - FIXED to include phone
+// ✅ GET /api/users/:id - Get user by ID
 export const getUserById = async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
@@ -36,7 +37,7 @@ export const getUserById = async (req, res) => {
         id: true, 
         name: true, 
         email: true, 
-        phone: true,  // ✅ Added phone
+        phone: true,
         role: true, 
         isActive: true, 
         createdAt: true 
@@ -45,28 +46,37 @@ export const getUserById = async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found." });
     res.json(user);
   } catch (err) {
+    console.error("❌ Error in getUserById:", err);
     res.status(500).json({ message: err.message });
   }
 };
 
-// ✅ POST /api/users - FIXED to include phone
+// ✅ POST /api/users - Create user with email
 export const createUser = async (req, res) => {
   try {
-    const { name, email, role, phone } = req.body; // ✅ Added phone
-    if (!name || !email)
+    const { name, email, role, phone } = req.body;
+    
+    // Validate input
+    if (!name || !email) {
       return res.status(400).json({ message: "Name and email are required." });
+    }
 
+    // Check if user already exists
     const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) return res.status(409).json({ message: "Email already in use." });
+    if (existing) {
+      return res.status(409).json({ message: "Email already in use." });
+    }
 
+    // Generate temporary password
     const tempPassword = `${Math.random().toString(36).slice(-6)}A1!`;
     const hashed = await bcrypt.hash(tempPassword, 10);
 
+    // Create user
     const user = await prisma.user.create({
       data: { 
         name, 
         email, 
-        phone: phone || null, // ✅ Added phone
+        phone: phone || null,
         password: hashed, 
         role: role || "STAFF" 
       },
@@ -74,12 +84,13 @@ export const createUser = async (req, res) => {
         id: true, 
         name: true, 
         email: true, 
-        phone: true, // ✅ Added phone
+        phone: true,
         role: true, 
         createdAt: true 
       },
     });
 
+    // ✅ Log action
     await logAction({
       userId: req.user.id,
       action: "CREATE",
@@ -91,28 +102,75 @@ export const createUser = async (req, res) => {
       req,
     });
 
-    await sendEmail(email, "Your Fusion IMS Account", welcomeUserTemplate(name, email, tempPassword, user.role));
+    // ✅ SEND WELCOME EMAIL - With proper error handling
+    let emailSent = false;
+    let emailError = null;
+    
+    try {
+      console.log(`📧 Attempting to send welcome email to: ${email}`);
+      
+      const emailHtml = welcomeUserTemplate(name, email, tempPassword, user.role);
+      const result = await sendEmail(
+        email, 
+        "🎉 Welcome to Fusion IMS - Your Account Details", 
+        emailHtml
+      );
+      
+      if (result) {
+        emailSent = true;
+        console.log(`✅ Welcome email sent successfully to ${email}`);
+      } else {
+        console.warn(`⚠️ Email sending returned null for ${email}`);
+      }
+    } catch (emailError) {
+      emailError = emailError.message;
+      console.error(`❌ Failed to send welcome email to ${email}:`, emailError);
+      // Don't fail the user creation if email fails
+    }
 
+    // ✅ Create notification for admin
     await createNotification({
       title: `👤 New User Created: ${user.name}`,
-      message: `User "${user.name}" has been created with role: ${user.role}. Email: ${user.email}.`,
-      type: 'SYSTEM_WARNING',
+      message: `User "${user.name}" has been created with role: ${user.role}. Email: ${user.email}. ${emailSent ? '✅ Credentials sent via email.' : '⚠️ Email failed to send.'}`,
+      type: 'USER_CREATED',
       priority: 'INFORMATION',
       referenceId: user.id,
       referenceType: 'User',
       actionUrl: `/users/${user.id}`,
     });
 
-    res.status(201).json({ user, message: "User created. Credentials sent via email." });
+    // ✅ Send notification to admin about new user
+    try {
+      await createNotification({
+        title: `📋 New User Registration: ${user.name}`,
+        message: `A new user "${user.name}" (${user.email}) has been created with role: ${user.role}. ${emailSent ? 'Welcome email sent.' : '⚠️ Email delivery failed.'}`,
+        type: 'USER_CREATED',
+        priority: 'INFORMATION',
+        referenceId: user.id,
+        referenceType: 'User',
+      });
+    } catch (notifError) {
+      console.error("❌ Failed to create admin notification:", notifError);
+    }
+
+    res.status(201).json({ 
+      user, 
+      message: emailSent 
+        ? "User created. Credentials sent via email." 
+        : "User created. But email sending failed. Please check SMTP configuration.",
+      emailSent,
+      emailError: emailError || null,
+    });
   } catch (err) {
+    console.error("❌ Create user error:", err);
     res.status(500).json({ message: err.message });
   }
 };
 
-// ✅ PATCH /api/users/:id - FIXED to handle phone
+// ✅ PATCH /api/users/:id - Update user
 export const updateUser = async (req, res) => {
   try {
-    const { name, role, isActive, phone } = req.body; // ✅ Added phone
+    const { name, role, isActive, phone } = req.body;
     
     // Get old values before update
     const oldUser = await prisma.user.findUnique({
@@ -130,18 +188,19 @@ export const updateUser = async (req, res) => {
         ...(name !== undefined && { name }),
         ...(role !== undefined && { role }),
         ...(isActive !== undefined && { isActive }),
-        ...(phone !== undefined && { phone }), // ✅ Added phone update
+        ...(phone !== undefined && { phone }),
       },
       select: { 
         id: true, 
         name: true, 
         email: true, 
-        phone: true,  // ✅ Include phone in response
+        phone: true,
         role: true, 
         isActive: true 
       },
     });
 
+    // ✅ Log action
     await logAction({
       userId: req.user.id,
       action: "UPDATE",
@@ -164,24 +223,46 @@ export const updateUser = async (req, res) => {
       req,
     });
 
+    // ✅ Create notification
     await createNotification({
       title: `✏️ User Updated: ${user.name}`,
       message: `User "${user.name}" details have been updated. Role: ${user.role}. Status: ${user.isActive ? 'Active' : 'Inactive'}.`,
-      type: 'SYSTEM_WARNING',
+      type: 'USER_STATUS_CHANGE',
       priority: 'INFORMATION',
       referenceId: user.id,
       referenceType: 'User',
       actionUrl: `/users/${user.id}`,
     });
 
+    // ✅ Send email notification on status change
+    if (isActive !== undefined && isActive !== oldUser.isActive) {
+      try {
+        const statusText = isActive ? 'activated' : 'deactivated';
+        const emailHtml = `
+          <h1>Account Status Update</h1>
+          <p>Hello ${user.name},</p>
+          <p>Your account has been ${statusText}.</p>
+          <p>If you have any questions, please contact your administrator.</p>
+          <p>Best regards,<br>Fusion IMS Team</p>
+        `;
+        await sendEmail(user.email, `Account ${statusText}`, emailHtml);
+        console.log(`✅ Status change email sent to ${user.email}`);
+      } catch (emailError) {
+        console.error(`❌ Failed to send status email:`, emailError);
+      }
+    }
+
     res.json(user);
   } catch (err) {
-    if (err.code === "P2025") return res.status(404).json({ message: "User not found." });
+    if (err.code === "P2025") {
+      return res.status(404).json({ message: "User not found." });
+    }
+    console.error("❌ Update user error:", err);
     res.status(500).json({ message: err.message });
   }
 };
 
-// DELETE /api/users/:id (soft delete – deactivate)
+// ✅ DELETE /api/users/:id - Soft delete (deactivate)
 export const deleteUser = async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
@@ -200,6 +281,7 @@ export const deleteUser = async (req, res) => {
       data: { isActive: !user.isActive } 
     });
 
+    // ✅ Log action
     await logAction({
       userId: req.user.id,
       action: action,
@@ -212,18 +294,38 @@ export const deleteUser = async (req, res) => {
       req,
     });
 
+    // ✅ Create notification
     await createNotification({
       title: `${user.isActive ? '🚫 User Deactivated' : '✅ User Activated'}: ${user.name}`,
       message: `User "${user.name}" (${user.email}) has been ${user.isActive ? 'deactivated' : 'activated'}.`,
-      type: 'SYSTEM_WARNING',
+      type: 'USER_STATUS_CHANGE',
       priority: user.isActive ? 'WARNING' : 'INFORMATION',
       referenceId: req.params.id,
       referenceType: 'User',
     });
 
+    // ✅ Send status change email
+    try {
+      const statusText = user.isActive ? 'deactivated' : 'activated';
+      const emailHtml = `
+        <h1>Account Status Update</h1>
+        <p>Hello ${user.name},</p>
+        <p>Your account has been ${statusText}.</p>
+        <p>If you have any questions, please contact your administrator.</p>
+        <p>Best regards,<br>Fusion IMS Team</p>
+      `;
+      await sendEmail(user.email, `Account ${statusText}`, emailHtml);
+      console.log(`✅ Status change email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error(`❌ Failed to send status email:`, emailError);
+    }
+
     res.json({ message: `User ${user.isActive ? 'deactivated' : 'activated'} successfully.` });
   } catch (err) {
-    if (err.code === "P2025") return res.status(404).json({ message: "User not found." });
+    if (err.code === "P2025") {
+      return res.status(404).json({ message: "User not found." });
+    }
+    console.error("❌ Delete user error:", err);
     res.status(500).json({ message: err.message });
   }
 };
