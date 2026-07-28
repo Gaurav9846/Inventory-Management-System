@@ -7,16 +7,17 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
-     "postinstall": "prisma generate",
+    "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-     "fix:audit-logs": "node prisma/scripts/fix-audit-logs.js",
-     "fix:audit-descriptions": "node prisma/scripts/fix-audit-descriptions.js",
-       "fix:deliveries": "node prisma/scripts/fixMissingDeliveries.js",
+    "fix:audit-logs": "node prisma/scripts/fix-audit-logs.js",
+    "fix:audit-descriptions": "node prisma/scripts/fix-audit-descriptions.js",
+    "fix:deliveries": "node prisma/scripts/fixMissingDeliveries.js",
     "prisma:seed": "node prisma/seed.js"
   },
   "dependencies": {
+    "@getbrevo/brevo": "^6.0.2",
     "@prisma/client": "^6.6.0",
     "axios": "^1.13.5",
     "bcrypt": "^6.0.0",

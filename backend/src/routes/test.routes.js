@@ -1,12 +1,15 @@
 // src/routes/test.routes.js
 import { Router } from "express";
-import { sendEmail } from "../config/nodemailer.js";
+import { sendEmail, verifyEmailConfig } from "../config/nodemailer.js";
+import { testBrevoConnection } from "../config/brevo.js";
 import { protect } from "../middleware/auth.middleware.js";
 import { restrictTo } from "../middleware/role.middleware.js";
 
 const router = Router();
 
-// ✅ Test email endpoint - Requires authentication
+// ============================================================
+// ✅ TEST EMAIL - Send a test email
+// ============================================================
 router.post("/test-email", protect, async (req, res) => {
   try {
     const { email, subject, message } = req.body;
@@ -19,9 +22,6 @@ router.post("/test-email", protect, async (req, res) => {
     }
 
     console.log(`📧 Test email requested for: ${email}`);
-    console.log(`   SMTP Host: ${process.env.SMTP_HOST}`);
-    console.log(`   SMTP Port: ${process.env.SMTP_PORT}`);
-    console.log(`   SMTP User: ${process.env.SMTP_USER}`);
     
     const testHtml = `
       <!DOCTYPE html>
@@ -29,136 +29,49 @@ router.post("/test-email", protect, async (req, res) => {
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>SMTP Test</title>
+        <title>Email Test</title>
         <style>
-          body { 
-            font-family: 'Segoe UI', Arial, sans-serif; 
-            line-height: 1.6; 
-            color: #333; 
-            max-width: 600px; 
-            margin: 0 auto; 
-            padding: 20px; 
-            background: #f5f7fa; 
-          }
-          .container { 
-            background: white; 
-            border-radius: 12px; 
-            overflow: hidden; 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
-          }
-          .header { 
-            background: linear-gradient(135deg, #4F46E5, #7C3AED); 
-            padding: 30px 20px; 
-            text-align: center; 
-          }
-          .header h1 { 
-            color: white; 
-            margin: 0; 
-            font-size: 24px; 
-          }
-          .content { 
-            padding: 30px; 
-          }
-          .success-box { 
-            background: #dcfce7; 
-            padding: 20px; 
-            border-radius: 8px; 
-            border-left: 4px solid #22c55e; 
-            margin: 15px 0; 
-          }
-          .success-box h2 { 
-            color: #166534; 
-            margin: 0 0 8px 0; 
-          }
-          .success-box p { 
-            color: #14532d; 
-            margin: 0; 
-          }
-          .details-box { 
-            background: #f8fafc; 
-            padding: 20px; 
-            border-radius: 8px; 
-            margin: 15px 0; 
-            border: 1px solid #e2e8f0; 
-          }
-          .details-box table { 
-            width: 100%; 
-            border-collapse: collapse; 
-          }
-          .details-box td { 
-            padding: 8px 0; 
-            border-bottom: 1px solid #e2e8f0; 
-          }
-          .details-box td:first-child { 
-            font-weight: 600; 
-            color: #64748b; 
-            width: 40%; 
-          }
-          .details-box tr:last-child td { 
-            border-bottom: none; 
-          }
-          .footer { 
-            text-align: center; 
-            padding: 20px; 
-            border-top: 1px solid #e2e8f0; 
-            color: #94a3b8; 
-            font-size: 12px; 
-          }
-          .badge { 
-            display: inline-block; 
-            background: #22c55e; 
-            color: white; 
-            padding: 2px 12px; 
-            border-radius: 12px; 
-            font-size: 12px; 
-            font-weight: 600; 
-          }
+          body { font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background: #f5f7fa; }
+          .container { background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+          .header { background: linear-gradient(135deg, #4F46E5, #7C3AED); padding: 30px 20px; text-align: center; }
+          .header h1 { color: white; margin: 0; font-size: 24px; }
+          .content { padding: 30px; }
+          .success-box { background: #dcfce7; padding: 20px; border-radius: 8px; border-left: 4px solid #22c55e; margin: 15px 0; }
+          .success-box h2 { color: #166534; margin: 0 0 8px 0; }
+          .success-box p { color: #14532d; margin: 0; }
+          .details { background: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #e2e8f0; }
+          .details td { padding: 6px 0; }
+          .details td:first-child { font-weight: 600; color: #64748b; width: 40%; }
+          .footer { text-align: center; padding: 20px; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 12px; }
+          .badge { display: inline-block; background: #22c55e; color: white; padding: 2px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
         </style>
       </head>
       <body>
         <div class="container">
           <div class="header">
-            <h1>📧 SMTP Test</h1>
-            <p style="color: rgba(255,255,255,0.8); margin: 5px 0 0;">
-              Email Configuration Test
-            </p>
+            <h1>📧 Email Test</h1>
+            <p style="color: rgba(255,255,255,0.8); margin: 5px 0 0;">Email Configuration Test</p>
           </div>
           <div class="content">
             <div class="success-box">
               <h2>✅ Test Email Sent Successfully!</h2>
-              <p>Your Brevo SMTP configuration is working correctly.</p>
+              <p>Your email configuration is working correctly.</p>
             </div>
             
             <p style="color: #64748b; margin: 5px 0 10px;">
-              <span class="badge">SMTP</span> Connection successful
+              <span class="badge">${process.env.BREVO_API_KEY ? 'Brevo API' : 'SMTP'}</span> 
+              Connection successful
             </p>
             
-            <div class="details-box">
+            <div class="details">
               <table>
-                <tr>
-                  <td>SMTP Host</td>
-                  <td><strong>${process.env.SMTP_HOST}</strong></td>
-                </tr>
-                <tr>
-                  <td>SMTP Port</td>
-                  <td><strong>${process.env.SMTP_PORT}</strong></td>
-                </tr>
-                <tr>
-                  <td>SMTP User</td>
-                  <td><strong>${process.env.SMTP_USER}</strong></td>
-                </tr>
-                <tr>
-                  <td>From Email</td>
-                  <td><strong>${process.env.EMAIL_FROM}</strong></td>
-                </tr>
-                <tr>
-                  <td>Sent To</td>
-                  <td><strong>${email}</strong></td>
-                </tr>
-                <tr>
-                  <td>Timestamp</td>
-                  <td><strong>${new Date().toISOString()}</strong></td>
-                </tr>
+                <tr><td>Method</td><td><strong>${process.env.BREVO_API_KEY ? 'Brevo API' : 'SMTP'}</strong></td></tr>
+                ${process.env.BREVO_API_KEY ? `<tr><td>API Key</td><td><strong>${process.env.BREVO_API_KEY.slice(0, 10)}...${process.env.BREVO_API_KEY.slice(-4)}</strong></td></tr>` : ''}
+                ${process.env.SMTP_HOST ? `<tr><td>SMTP Host</td><td><strong>${process.env.SMTP_HOST}</strong></td></tr>` : ''}
+                ${process.env.SMTP_PORT ? `<tr><td>SMTP Port</td><td><strong>${process.env.SMTP_PORT}</strong></td></tr>` : ''}
+                <tr><td>From Email</td><td><strong>${process.env.EMAIL_FROM}</strong></td></tr>
+                <tr><td>Sent To</td><td><strong>${email}</strong></td></tr>
+                <tr><td>Timestamp</td><td><strong>${new Date().toISOString()}</strong></td></tr>
               </table>
             </div>
             
@@ -184,7 +97,7 @@ router.post("/test-email", protect, async (req, res) => {
 
     const result = await sendEmail(
       email,
-      subject || "✅ SMTP Test - Brevo Configuration Working",
+      subject || "✅ Email Test - Configuration Working",
       testHtml
     );
 
@@ -214,42 +127,86 @@ router.post("/test-email", protect, async (req, res) => {
   }
 });
 
-// ✅ Test SMTP connection only (no email send)
-router.get("/test-smtp", protect, restrictTo("ADMIN"), async (req, res) => {
+// ============================================================
+// ✅ TEST BREVO API - Direct Brevo API test
+// ============================================================
+router.post("/test-brevo", protect, restrictTo("ADMIN"), async (req, res) => {
   try {
-    const transporter = (await import("../config/nodemailer.js")).default;
+    const { email } = req.body;
     
-    // Verify connection
-    const verified = await new Promise((resolve) => {
-      transporter.verify((error, success) => {
-        if (error) {
-          resolve({ success: false, error: error.message });
-        } else {
-          resolve({ success: true });
-        }
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email address is required"
       });
-    });
+    }
+
+    console.log(`🧪 Testing Brevo API connection to: ${email}`);
+    const result = await testBrevoConnection(email);
 
     res.json({
-      success: verified.success,
-      message: verified.success 
-        ? "SMTP connection successful" 
-        : `SMTP connection failed: ${verified.error}`,
-      config: {
-        host: process.env.SMTP_HOST,
-        port: process.env.SMTP_PORT,
-        user: process.env.SMTP_USER,
-        from: process.env.EMAIL_FROM,
-        secure: false,
-      },
+      success: result.success,
+      message: result.message,
+      data: result.success ? { messageId: result.messageId } : null,
     });
   } catch (error) {
-    console.error("❌ SMTP test failed:", error);
+    console.error("❌ Brevo API test failed:", error);
     res.status(500).json({
       success: false,
       message: error.message,
     });
   }
+});
+
+// ============================================================
+// ✅ CHECK CONFIGURATION - View email config status
+// ============================================================
+router.get("/test-config", protect, restrictTo("ADMIN"), async (req, res) => {
+  try {
+    const configStatus = await verifyEmailConfig();
+
+    res.json({
+      success: true,
+      config: {
+        emailFrom: process.env.EMAIL_FROM || 'Not set',
+        services: {
+          brevo: {
+            configured: !!process.env.BREVO_API_KEY,
+            apiKey: process.env.BREVO_API_KEY ? 
+              `${process.env.BREVO_API_KEY.slice(0, 10)}...${process.env.BREVO_API_KEY.slice(-4)}` : 
+              'Not set',
+            working: configStatus.brevo?.working || false,
+          },
+          smtp: {
+            configured: !!process.env.SMTP_HOST,
+            host: process.env.SMTP_HOST || 'Not set',
+            port: process.env.SMTP_PORT || 'Not set',
+            user: process.env.SMTP_USER || 'Not set',
+            working: configStatus.smtp?.working || false,
+          },
+        },
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error("❌ Config check failed:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// ============================================================
+// ✅ HEALTH CHECK - Simple health check
+// ============================================================
+router.get("/health", (req, res) => {
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+  });
 });
 
 export default router;
