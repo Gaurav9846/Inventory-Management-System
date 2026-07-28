@@ -1,7 +1,7 @@
 // src/routes/test.routes.js
 import { Router } from "express";
 import { sendEmail, verifyEmailConfig } from "../config/nodemailer.js";
-import { testBrevoConnection } from "../config/brevo.js";
+import { testResendConnection } from "../config/resend.js";
 import { protect } from "../middleware/auth.middleware.js";
 import { restrictTo } from "../middleware/role.middleware.js";
 
@@ -40,8 +40,7 @@ router.post("/test-email", protect, async (req, res) => {
           .success-box h2 { color: #166534; margin: 0 0 8px 0; }
           .success-box p { color: #14532d; margin: 0; }
           .details { background: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #e2e8f0; }
-          .details td { padding: 6px 0; }
-          .details td:first-child { font-weight: 600; color: #64748b; width: 40%; }
+          .details p { margin: 4px 0; }
           .footer { text-align: center; padding: 20px; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 12px; }
           .badge { display: inline-block; background: #22c55e; color: white; padding: 2px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
         </style>
@@ -58,21 +57,17 @@ router.post("/test-email", protect, async (req, res) => {
               <p>Your email configuration is working correctly.</p>
             </div>
             
-            <p style="color: #64748b; margin: 5px 0 10px;">
-              <span class="badge">${process.env.BREVO_API_KEY ? 'Brevo API' : 'SMTP'}</span> 
+            <p style="margin: 5px 0 10px;">
+              <span class="badge">${process.env.RESEND_API_KEY ? 'Resend API' : 'SMTP'}</span> 
               Connection successful
             </p>
             
             <div class="details">
-              <table>
-                <tr><td>Method</td><td><strong>${process.env.BREVO_API_KEY ? 'Brevo API' : 'SMTP'}</strong></td></tr>
-                ${process.env.BREVO_API_KEY ? `<tr><td>API Key</td><td><strong>${process.env.BREVO_API_KEY.slice(0, 10)}...${process.env.BREVO_API_KEY.slice(-4)}</strong></td></tr>` : ''}
-                ${process.env.SMTP_HOST ? `<tr><td>SMTP Host</td><td><strong>${process.env.SMTP_HOST}</strong></td></tr>` : ''}
-                ${process.env.SMTP_PORT ? `<tr><td>SMTP Port</td><td><strong>${process.env.SMTP_PORT}</strong></td></tr>` : ''}
-                <tr><td>From Email</td><td><strong>${process.env.EMAIL_FROM}</strong></td></tr>
-                <tr><td>Sent To</td><td><strong>${email}</strong></td></tr>
-                <tr><td>Timestamp</td><td><strong>${new Date().toISOString()}</strong></td></tr>
-              </table>
+              <p><strong>Method:</strong> ${process.env.RESEND_API_KEY ? 'Resend API' : 'SMTP'}</p>
+              ${process.env.RESEND_API_KEY ? `<p><strong>API Key:</strong> ${process.env.RESEND_API_KEY.slice(0, 10)}...${process.env.RESEND_API_KEY.slice(-4)}</p>` : ''}
+              <p><strong>From:</strong> ${process.env.EMAIL_FROM}</p>
+              <p><strong>Sent To:</strong> ${email}</p>
+              <p><strong>Time:</strong> ${new Date().toISOString()}</p>
             </div>
             
             ${message ? `<div style="background: #fef3c7; padding: 12px; border-radius: 8px; margin: 10px 0;">
@@ -86,9 +81,6 @@ router.post("/test-email", protect, async (req, res) => {
           </div>
           <div class="footer">
             <p>Fusion IMS &bull; ${new Date().getFullYear()}</p>
-            <p style="margin-top: 4px; font-size: 11px; color: #b0b0b0;">
-              This is an automated test email.
-            </p>
           </div>
         </div>
       </body>
@@ -128,9 +120,9 @@ router.post("/test-email", protect, async (req, res) => {
 });
 
 // ============================================================
-// ✅ TEST BREVO API - Direct Brevo API test
+// ✅ TEST RESEND API - Direct Resend API test
 // ============================================================
-router.post("/test-brevo", protect, restrictTo("ADMIN"), async (req, res) => {
+router.post("/test-resend", protect, restrictTo("ADMIN"), async (req, res) => {
   try {
     const { email } = req.body;
     
@@ -141,8 +133,8 @@ router.post("/test-brevo", protect, restrictTo("ADMIN"), async (req, res) => {
       });
     }
 
-    console.log(`🧪 Testing Brevo API connection to: ${email}`);
-    const result = await testBrevoConnection(email);
+    console.log(`🧪 Testing Resend API connection to: ${email}`);
+    const result = await testResendConnection(email);
 
     res.json({
       success: result.success,
@@ -150,7 +142,7 @@ router.post("/test-brevo", protect, restrictTo("ADMIN"), async (req, res) => {
       data: result.success ? { messageId: result.messageId } : null,
     });
   } catch (error) {
-    console.error("❌ Brevo API test failed:", error);
+    console.error("❌ Resend API test failed:", error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -169,21 +161,12 @@ router.get("/test-config", protect, restrictTo("ADMIN"), async (req, res) => {
       success: true,
       config: {
         emailFrom: process.env.EMAIL_FROM || 'Not set',
-        services: {
-          brevo: {
-            configured: !!process.env.BREVO_API_KEY,
-            apiKey: process.env.BREVO_API_KEY ? 
-              `${process.env.BREVO_API_KEY.slice(0, 10)}...${process.env.BREVO_API_KEY.slice(-4)}` : 
-              'Not set',
-            working: configStatus.brevo?.working || false,
-          },
-          smtp: {
-            configured: !!process.env.SMTP_HOST,
-            host: process.env.SMTP_HOST || 'Not set',
-            port: process.env.SMTP_PORT || 'Not set',
-            user: process.env.SMTP_USER || 'Not set',
-            working: configStatus.smtp?.working || false,
-          },
+        resend: {
+          configured: !!process.env.RESEND_API_KEY,
+          apiKey: process.env.RESEND_API_KEY ? 
+            `${process.env.RESEND_API_KEY.slice(0, 10)}...${process.env.RESEND_API_KEY.slice(-4)}` : 
+            'Not set',
+          working: configStatus.resend?.working || false,
         },
         timestamp: new Date().toISOString(),
       },
@@ -198,7 +181,7 @@ router.get("/test-config", protect, restrictTo("ADMIN"), async (req, res) => {
 });
 
 // ============================================================
-// ✅ HEALTH CHECK - Simple health check
+// ✅ HEALTH CHECK
 // ============================================================
 router.get("/health", (req, res) => {
   res.json({
