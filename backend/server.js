@@ -27,7 +27,6 @@ import productCatalogRoutes from "./src/routes/productCatalog.routes.js";
 import stockDetailRoutes from "./src/routes/stockDetail.routes.js";
 import auditLogRoutes from "./src/routes/auditLog.routes.js";
 import invoiceRoutes from "./src/routes/invoice.routes.js";
-import testRoutes from "./src/routes/test.routes.js";
 
 // ✅ Import cron jobs
 import { startAllJobs } from "./src/jobs/cronjobs.js";
@@ -87,7 +86,6 @@ app.use("/api/product-catalog", productCatalogRoutes);
 app.use("/api/stock-detail", stockDetailRoutes);
 app.use("/api/audit-logs", auditLogRoutes);
 app.use("/api/invoices", invoiceRoutes);
-app.use("/api/test", testRoutes);
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((req, res) => {
