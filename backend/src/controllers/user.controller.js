@@ -2,7 +2,7 @@
 import bcrypt from "bcrypt";
 import prisma from "../config/prisma.js";
 import { logAction } from "../utils/auditLog.js";
-import { sendEmail } from "../config/nodemailer.js";
+import { sendEmail } from "../config/brevo.js";
 import { welcomeUserTemplate } from "../utils/emailTemplates.js";
 import { createNotification } from "./notification.controller.js";
 

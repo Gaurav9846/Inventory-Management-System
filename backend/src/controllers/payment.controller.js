@@ -2,7 +2,7 @@
 import axios from "axios";
 import prisma from "../config/prisma.js";
 import { logAction } from "../utils/auditLog.js";
-import { sendEmail } from "../config/nodemailer.js";
+import { sendEmail } from "../config/brevo.js";
 import { paymentSuccessTemplate } from "../utils/emailTemplates.js";
 
 const KHALTI_BASE = "https://a.khalti.com/api/v2";

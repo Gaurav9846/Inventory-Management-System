@@ -1,7 +1,7 @@
 // src/controllers/notification.controller.js
 
 import prisma from "../config/prisma.js";
-import { sendEmail } from "../config/nodemailer.js";
+import { sendEmail } from "../config/brevo.js";
 import { logAction } from "../utils/auditLog.js";
 
 // ==================== EMAIL TEMPLATES ====================
