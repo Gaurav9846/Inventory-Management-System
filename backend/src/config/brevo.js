@@ -16,7 +16,7 @@ export const sendEmail = async (to, subject, html) => {
     console.log(`📧 Sending email via Brevo API to: ${to}`);
     console.log(`   Subject: ${subject}`);
 
-    const data = await client.sendTransacEmail({
+    const data = await client.transactionalEmails.sendTransacEmail({
       subject,
       htmlContent: html,
       sender: { 
