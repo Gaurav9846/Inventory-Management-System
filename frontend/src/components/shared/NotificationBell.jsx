@@ -1,6 +1,7 @@
 // src/components/manager/NotificationBell.jsx
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext.jsx";
 import { notificationsApi } from "@/api/index.js";
 import { Button } from "@/components/ui/button.jsx";
 import { Bell, BellRing, CheckCheck, X, AlertCircle, CreditCard, Package, Truck, ShoppingBag, Users, Mail, Send } from "lucide-react";
@@ -23,6 +24,12 @@ const getNotificationIcon = (type, priority) => {
   }
 };
 
+const getBasePath = (role) => {
+  if (role === "ADMIN") return "/admin";
+  if (role === "MANAGER") return "/manager";
+  return "/staff";
+};
+
 export default function NotificationBell() {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -30,6 +37,7 @@ export default function NotificationBell() {
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef(null);
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   useEffect(() => {
     fetchNotifications();
@@ -93,16 +101,19 @@ export default function NotificationBell() {
       notificationsApi.markAsRead(notification.id).catch(console.error);
     }
     setIsOpen(false);
+    const base = getBasePath(user?.role);
     if (notification.type === 'LOW_STOCK') {
-      navigate('/manager/low-stock');
+      navigate(`${base}/low-stock`);
     } else if (notification.type === 'APPROVAL_REQUEST') {
-      navigate('/manager/stock-adjustments');
+      navigate(`${base}/stock-adjustments`);
     } else if (notification.type === 'CREDIT_DUE') {
-      navigate('/manager/credit');
+      navigate(`${base}/credit`);
     } else {
-      navigate('/manager/notifications');
+      navigate(`${base}/notifications`);
     }
   };
+
+  const basePath = getBasePath(user?.role);
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -194,7 +205,7 @@ export default function NotificationBell() {
           <div className="px-4 py-2 border-t border-slate-200 bg-slate-50 text-center">
             <button
               onClick={() => {
-                navigate('/manager/notifications');
+                navigate(`${basePath}/notifications`);
                 setIsOpen(false);
               }}
               className="text-xs text-emerald-600 hover:text-emerald-700 font-medium"
