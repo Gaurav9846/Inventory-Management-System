@@ -1,4 +1,4 @@
-// src/App.jsx  — complete role-separated routing
+// src/App.jsx  — complete role-separated routing with proper path structure
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext.jsx";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner.jsx";
@@ -70,8 +70,9 @@ function PublicRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingSpinner />;
   if (user) {
-    if (user.role === "MANAGER") return <Navigate to="/manager" replace />;
-    if (user.role === "STAFF")   return <Navigate to="/staff"   replace />;
+    // ✅ FIXED: Redirect to role-specific dashboard with /dashboard path
+    if (user.role === "MANAGER") return <Navigate to="/manager/dashboard" replace />;
+    if (user.role === "STAFF")   return <Navigate to="/staff/dashboard" replace />;
     return <Navigate to="/admin/dashboard" replace />;
   }
   return children;
@@ -83,11 +84,23 @@ function ProtectedRoute({ children, allowedRoles }) {
   if (loading) return <LoadingSpinner />;
   if (!user)   return <Navigate to="/login" replace />;
   if (allowedRoles && !allowedRoles.includes(user.role)) {
-    if (user.role === "MANAGER") return <Navigate to="/manager" replace />;
-    if (user.role === "STAFF")   return <Navigate to="/staff"   replace />;
+    // ✅ FIXED: Redirect to role-specific dashboard with /dashboard path
+    if (user.role === "MANAGER") return <Navigate to="/manager/dashboard" replace />;
+    if (user.role === "STAFF")   return <Navigate to="/staff/dashboard" replace />;
     return <Navigate to="/admin/dashboard" replace />;
   }
   return children;
+}
+
+/* ─── ✅ NEW: Root redirect to role-specific dashboard ───────────────────── */
+function RootRedirect() {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingSpinner />;
+  if (!user) return <Navigate to="/login" replace />;
+  // ✅ Redirect to role-specific dashboard with /dashboard path
+  if (user.role === "MANAGER") return <Navigate to="/manager/dashboard" replace />;
+  if (user.role === "STAFF")   return <Navigate to="/staff/dashboard" replace />;
+  return <Navigate to="/admin/dashboard" replace />;
 }
 
 export default function App() {
@@ -96,62 +109,68 @@ export default function App() {
       <AuthProvider>
         <Routes>
 
+          {/* ─── ✅ NEW: ROOT REDIRECT ────────────────────────────────────── */}
+          <Route path="/" element={<RootRedirect />} />
+
           {/* ─── Public routes ──────────────────────────────────────────── */}
           <Route path="/login" element={
             <PublicRoute><Login /></PublicRoute>
           } />
 
           {/* ─── ADMIN panel (dark blue sidebar) ────────────────────────── */}
-          <Route path="/" element={
+          <Route path="/admin" element={
             <ProtectedRoute allowedRoles={["ADMIN"]}>
               <Layout />
             </ProtectedRoute>
           }>
-            {/* Dashboard */}
-            <Route path="admin/dashboard" element={<AdminDashboard />} />
+            {/* ✅ CHANGED: /admin/dashboard instead of /admin */}
+            <Route path="dashboard" element={<AdminDashboard />} />
             
             {/* Orders */}
-            <Route path="admin/orders" element={<AdminOrders />} />
-            <Route path="admin/create-order" element={<AdminCreateOrder />} />
+            <Route path="orders" element={<AdminOrders />} />
+            <Route path="create-order" element={<AdminCreateOrder />} />
             
             {/* Customers */}
-            <Route path="admin/customers" element={<AdminCustomers />} />
-            <Route path="admin/credit" element={<AdminCreditAccounts />} />
+            <Route path="customers" element={<AdminCustomers />} />
+            <Route path="credit" element={<AdminCreditAccounts />} />
             
             {/* Deliveries */}
-            <Route path="admin/delivery" element={<AdminDeliveries />} />
+            <Route path="delivery" element={<AdminDeliveries />} />
             
             {/* Inventory */}
-            <Route path="admin/stock-overview" element={<AdminStockOverview />} />
-            <Route path="admin/products" element={<AdminProducts />} />
-            <Route path="admin/stock-adjustments" element={<AdminStockAdjustments />} />
-            <Route path="admin/catalog" element={<AdminProductCatalog />} />
+            <Route path="stock-overview" element={<AdminStockOverview />} />
+            <Route path="products" element={<AdminProducts />} />
+            <Route path="stock-adjustments" element={<AdminStockAdjustments />} />
+            <Route path="catalog" element={<AdminProductCatalog />} />
             
             {/* Suppliers */}
-            <Route path="admin/suppliers" element={<AdminSuppliers />} />
-            <Route path="admin/suppliers/new" element={<AdminAddSupplier />} />
-            <Route path="admin/suppliers/:id" element={<AdminSupplierDetail />} />
-            <Route path="admin/suppliers/:id/edit" element={<AdminAddSupplier />} />
+            <Route path="suppliers" element={<AdminSuppliers />} />
+            <Route path="suppliers/new" element={<AdminAddSupplier />} />
+            <Route path="suppliers/:id" element={<AdminSupplierDetail />} />
+            <Route path="suppliers/:id/edit" element={<AdminAddSupplier />} />
             
             {/* Purchase Orders */}
-            <Route path="admin/purchase-orders" element={<AdminPurchaseOrders />} />
-            <Route path="admin/purchase-orders/new" element={<AdminCreatePurchaseOrder />} />
-            <Route path="admin/purchase-orders/:id" element={<AdminPurchaseOrderDetail />} />
+            <Route path="purchase-orders" element={<AdminPurchaseOrders />} />
+            <Route path="purchase-orders/new" element={<AdminCreatePurchaseOrder />} />
+            <Route path="purchase-orders/:id" element={<AdminPurchaseOrderDetail />} />
             
             {/* Reports */}
-            <Route path="admin/reports" element={<AdminReports />} />
+            <Route path="reports" element={<AdminReports />} />
             
             {/* Notifications */}
-            <Route path="admin/notifications" element={<AdminNotifications />} />
+            <Route path="notifications" element={<AdminNotifications />} />
             
             {/* Profile Requests */}
-            <Route path="admin/profile-requests" element={<AdminProfileRequests />} />
+            <Route path="profile-requests" element={<AdminProfileRequests />} />
             
             {/* Administration */}
-            <Route path="admin/users" element={<AdminUsers />} />
-            <Route path="admin/audit-logs" element={<AdminAuditlogs />} />
+            <Route path="users" element={<AdminUsers />} />
+            <Route path="audit-logs" element={<AdminAuditlogs />} />
+            
+            {/* Password Change */}
             <Route path="change-password" element={<ChangePassword />} />
             
+            {/* Catch-all */}
             <Route path="*" element={<NotFound />} />
           </Route>
 
@@ -161,7 +180,9 @@ export default function App() {
               <ManagerLayout />
             </ProtectedRoute>
           }>
-            <Route index element={<ManagerDashboard />} />
+            {/* ✅ CHANGED: /manager/dashboard instead of index */}
+            <Route path="dashboard" element={<ManagerDashboard />} />
+            
             <Route path="inventory" element={<ManagerStockOverview />} />
             <Route path="products" element={<ManagerProducts />} />
             <Route path="orders" element={<ManagerOrders />} />
@@ -177,9 +198,9 @@ export default function App() {
             <Route path="purchase-orders/:id" element={<PurchaseOrderDetail />} />
             <Route path="delivery" element={<ManagerDeliveries />} />
             <Route path="reports" element={<ManagerReports />} />
-            <Route path="change-password" element={<ChangePassword />} />
             <Route path="stock-adjustments" element={<ManagerStockAdjustments />} />
             <Route path="notifications" element={<ManagerNotifications />} />
+            <Route path="change-password" element={<ChangePassword />} />
             <Route path="*" element={<NotFound />} />
           </Route>
 
@@ -189,15 +210,17 @@ export default function App() {
               <StaffLayout />
             </ProtectedRoute>
           }>
-            <Route index element={<StaffDashboard />} />
+            {/* ✅ CHANGED: /staff/dashboard instead of index */}
+            <Route path="dashboard" element={<StaffDashboard />} />
+            
             <Route path="orders" element={<StaffOrders />} />
             <Route path="create-order" element={<CreateOrder />} />
             <Route path="delivery" element={<StaffDelivery />} />
             <Route path="customers" element={<StaffCustomers />} />
             <Route path="credit-accounts" element={<StaffCreditAccounts />} />
             <Route path="reports" element={<StaffReports />} />
-            <Route path="change-password" element={<ChangePassword />} />
             <Route path="stock-adjustment" element={<StaffStockAdjustment />} />
+            <Route path="change-password" element={<ChangePassword />} />
             <Route path="*" element={<NotFound />} />
           </Route>
 
